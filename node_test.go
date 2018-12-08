@@ -99,7 +99,7 @@ var tests = []nodeTest{
 		name:    "Test Node VM",
 		wantErr: false,
 		vm: vm{
-			name:          "ca-grpc-multipass-vm-00",
+			name:          testNodeName,
 			memory:        2048,
 			cpu:           2,
 			disk:          5120,
