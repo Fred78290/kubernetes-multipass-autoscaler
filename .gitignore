@@ -18,3 +18,5 @@ vendor
 examples/config\.json
 
 kubernetes-multipass-autoscaler
+masterkube/cluster/*
+masterkube/kubernetes/*
