@@ -42,10 +42,7 @@ type MultipassServer struct {
 	resourceLimiter *resourceLimiter
 	nodeGroups      map[string]*multipassNodeGroup
 	config          MultipassServerConfig
-	kubeAdmToken    string
-	kubeAdmAddress  string
-	kubeAdmCA       string
-	kubeAdmExtras   []string
+	kubeAdmConfig   *apigrpc.KubeAdmConfig
 }
 
 func (s *MultipassServer) generateNodeGroupName() string {
@@ -109,10 +106,10 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 		if nodeGroup.minSize > 0 {
 
 			extras := &nodeCreationExtra{
-				s.kubeAdmAddress,
-				s.kubeAdmToken,
-				s.kubeAdmCA,
-				s.kubeAdmExtras,
+				s.kubeAdmConfig.KubeAdmAddress,
+				s.kubeAdmConfig.KubeAdmToken,
+				s.kubeAdmConfig.KubeAdmCACert,
+				s.kubeAdmConfig.KubeAdmExtraArguments,
 				s.config.Image,
 				&s.config.CloudInit,
 				&s.config.MountPoints,
@@ -140,9 +137,15 @@ func (s *MultipassServer) Connect(ctx context.Context, request *apigrpc.ConnectR
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	s.resourceLimiter = &resourceLimiter{
-		minLimits: request.ResourceLimiter.MinLimits,
-		maxLimits: request.ResourceLimiter.MaxLimits,
+	if request.GetResourceLimiter() != nil {
+		s.resourceLimiter = &resourceLimiter{
+			minLimits: request.ResourceLimiter.MinLimits,
+			maxLimits: request.ResourceLimiter.MaxLimits,
+		}
+	}
+
+	if request.GetKubeAdmConfiguration() != nil {
+		s.kubeAdmConfig = request.GetKubeAdmConfiguration()
 	}
 
 	return &apigrpc.ConnectReply{
@@ -546,10 +549,10 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 	}
 
 	extras := &nodeCreationExtra{
-		s.kubeAdmAddress,
-		s.kubeAdmToken,
-		s.kubeAdmCA,
-		s.kubeAdmExtras,
+		s.kubeAdmConfig.KubeAdmAddress,
+		s.kubeAdmConfig.KubeAdmToken,
+		s.kubeAdmConfig.KubeAdmCACert,
+		s.kubeAdmConfig.KubeAdmExtraArguments,
 		s.config.Image,
 		&s.config.CloudInit,
 		&s.config.MountPoints,
@@ -718,10 +721,10 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 	}
 
 	extras := &nodeCreationExtra{
-		s.kubeAdmAddress,
-		s.kubeAdmToken,
-		s.kubeAdmCA,
-		s.kubeAdmExtras,
+		s.kubeAdmConfig.KubeAdmAddress,
+		s.kubeAdmConfig.KubeAdmToken,
+		s.kubeAdmConfig.KubeAdmCACert,
+		s.kubeAdmConfig.KubeAdmExtraArguments,
 		s.config.Image,
 		&s.config.CloudInit,
 		&s.config.MountPoints,

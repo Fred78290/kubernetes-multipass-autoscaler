@@ -70,10 +70,12 @@ func newTestServer(nodeGroup *multipassNodeGroup) (context.Context, *MultipassSe
 				},
 			},
 		},
-		kubeAdmToken:   kubeToken,
-		kubeAdmAddress: kubeHost,
-		kubeAdmCA:      kubeCACert,
-		kubeAdmExtras:  kubeExtraArgs,
+		kubeAdmConfig: &apigrpc.KubeAdmConfig{
+			KubeAdmToken:          kubeToken,
+			KubeAdmAddress:        kubeHost,
+			KubeAdmCACert:         kubeCACert,
+			KubeAdmExtraArguments: kubeExtraArgs,
+		},
 	}
 
 	if nodeGroup != nil {

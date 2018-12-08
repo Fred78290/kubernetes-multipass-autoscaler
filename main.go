@@ -27,7 +27,7 @@ import (
 	"github.com/golang/glog"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 
-	"github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
+	apigrc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
@@ -75,22 +75,27 @@ func main() {
 	}
 
 	server := grpc.NewServer()
+
+	kubeAdmConfig := &apigrc.KubeAdmConfig{
+		KubeAdmAddress:        *joinPtr,
+		KubeAdmToken:          *tokenPtr,
+		KubeAdmCACert:         *caPtr,
+		KubeAdmExtraArguments: kubeAdmExtras,
+	}
+
 	multipassserver := &MultipassServer{
 		resourceLimiter: &resourceLimiter{
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
 			map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
 		},
-		config:         config,
-		nodeGroups:     make(map[string]*multipassNodeGroup),
-		kubeAdmAddress: *joinPtr,
-		kubeAdmToken:   *tokenPtr,
-		kubeAdmCA:      *caPtr,
-		kubeAdmExtras:  kubeAdmExtras,
+		config:        config,
+		nodeGroups:    make(map[string]*multipassNodeGroup),
+		kubeAdmConfig: kubeAdmConfig,
 	}
 
-	grpccloudprovider.RegisterCloudProviderServiceServer(server, multipassserver)
-	grpccloudprovider.RegisterNodeGroupServiceServer(server, multipassserver)
-	grpccloudprovider.RegisterPricingModelServiceServer(server, multipassserver)
+	apigrc.RegisterCloudProviderServiceServer(server, multipassserver)
+	apigrc.RegisterNodeGroupServiceServer(server, multipassserver)
+	apigrc.RegisterPricingModelServiceServer(server, multipassserver)
 
 	reflection.Register(server)
 
