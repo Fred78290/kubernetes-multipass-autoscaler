@@ -137,7 +137,7 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	// Launch the VM and wait until finish launched
 	cmd = exec.Command("multipass", args...)
 
-	glog.Errorf("Execute:%v", args)
+	glog.Infof("Execute:%v", args)
 
 	if output, err = cmd.Output(); err != nil {
 		glog.Errorf(errUnableToLaunchVM, vm.nodeName, string(output), err)
@@ -169,10 +169,17 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 		}
 
 		args = []string{
+			"exec",
+			vm.nodeName,
+			"--",
+			"sudo",
+			"kubeadm",
 			"join",
 			extras.kubeHost,
-			fmt.Sprintf("--token=%s", extras.kubeToken),
-			fmt.Sprintf("--discovery-token-ca-cert-hash=%s", extras.kubeCACert),
+			"--token",
+			extras.kubeToken,
+			"--discovery-token-ca-cert-hash",
+			fmt.Sprintf("sha256:%s", extras.kubeCACert),
 		}
 
 		// Append extras arguments
@@ -180,7 +187,9 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 			args = append(args, extras.kubeExtraArgs...)
 		}
 
-		cmd = exec.Command("kubeadm", args...)
+		glog.Errorf("Execute:%v", args)
+
+		cmd = exec.Command("multipass", args...)
 
 		if out, err := cmd.Output(); err != nil {
 			glog.Errorf(errKubeAdmJoinFailed, vm.nodeName, string(out), err)

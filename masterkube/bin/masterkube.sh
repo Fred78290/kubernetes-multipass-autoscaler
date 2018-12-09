@@ -6,6 +6,9 @@ pushd $CURDIR
 
 export PATH=$PWD:$PATH
 
+rm -rf $PWD/../cluster/*
+rm -rf $PWD/../kubernetes/*
+
 multipass delete masterkube -p &> /dev/null
 
 kubeconfig-delete.sh masterkube
@@ -31,13 +34,11 @@ multipass restart masterkube
 
 multipass shell masterkube <<EOF
 sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; create-cluster.sh flannel ens3 $KUBERNETES_VERSION"
-TOKEN=$(cat /etc/cluster/token)
-CACERT=$(cat /etc/cluster/ca.cert)
-echo "kubeadm token=$TOKEN"
-echo "kubeadm ca.cert=sha256:$CACERT"
+echo "kubeadm token=$(cat /etc/cluster/token)"
+echo "kubeadm ca.cert=sha256:$(cat /etc/cluster/ca.cert)"
 exit
 EOF
 
-kubeconfig-merge.sh masterkube $PWD/../etc/config
+kubeconfig-merge.sh masterkube $PWD/../cluster/config
 
 popd

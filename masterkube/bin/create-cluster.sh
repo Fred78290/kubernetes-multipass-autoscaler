@@ -16,7 +16,7 @@ IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
 
 mkdir -p $CLUSTER_DIR
 
-echo -n $IPADDR > $CLUSTER_DIR/manager-ip
+echo -n "$IPADDR:6443" > $CLUSTER_DIR/manager-ip
 
 if [ "x$KUBERNETES_VERION" != "x" ]; then
     K8_OPTIONS="--token-ttl 0 --ignore-preflight-errors=All --apiserver-advertise-address $IPADDR --kubernetes-version $KUBERNETES_VERION"
