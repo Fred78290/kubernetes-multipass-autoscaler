@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,44 +35,29 @@ var testNodeGroup = multipassNodeGroup{
 }
 
 func newTestServer(nodeGroup *multipassNodeGroup) (context.Context, *MultipassServer) {
+
+	var config MultipassServerConfig
+
+	configStr, _ := ioutil.ReadFile("./masterkube/config/config.json")
+
+	json.Unmarshal(configStr, &config)
+
+	bKubeHost, _ := ioutil.ReadFile("./masterkube/cluster/manager-ip")
+	kubeHost = strings.TrimSpace(string(bKubeHost))
+
+	bKubeToken, _ := ioutil.ReadFile("./masterkube/cluster/token")
+	kubeToken = strings.TrimSpace(string(bKubeToken))
+
+	bKubeCACert, _ := ioutil.ReadFile("./masterkube/cluster/ca.cert")
+	kubeCACert = strings.TrimSpace(string(bKubeCACert))
+
 	s := &MultipassServer{
 		resourceLimiter: &resourceLimiter{
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
 			map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
 		},
 		nodeGroups: map[string]*multipassNodeGroup{},
-		config: MultipassServerConfig{
-			Address:    "127.0.0.1",
-			Port:       5200,
-			ProviderID: testProviderID,
-			MinNode:    0,
-			MaxNode:    3,
-			NodePrice:  0,
-			PodPrice:   0,
-			Image:      "",
-			Machines: map[string]*machineCharacteristic{
-				"tiny": &machineCharacteristic{
-					Memory: 512,
-					Vcpu:   1,
-					Disk:   5120,
-				},
-				"medium": &machineCharacteristic{
-					Memory: 1024,
-					Vcpu:   2,
-					Disk:   10240,
-				},
-				"large": &machineCharacteristic{
-					Memory: 4096,
-					Vcpu:   4,
-					Disk:   10240,
-				},
-				"extra-large": &machineCharacteristic{
-					Memory: 8192,
-					Vcpu:   8,
-					Disk:   102400,
-				},
-			},
-		},
+		config:     config,
 		kubeAdmConfig: &apigrpc.KubeAdmConfig{
 			KubeAdmToken:          kubeToken,
 			KubeAdmAddress:        kubeHost,
