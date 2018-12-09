@@ -51,4 +51,5 @@ const (
 	errVMNotFound                     = "Unable to find VM: %s"
 	errVMStopFailed                   = "Unable to stop VM: %s before delete"
 	errNodeGroupCleanupFailOnVM       = "On node group: %s, failed to delete VM: %s, reason: %v"
+	errKubeCtlIgnoredError            = "kubectl got error: %s on VM: %s, reason: %s"
 )

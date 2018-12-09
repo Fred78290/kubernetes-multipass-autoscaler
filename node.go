@@ -233,6 +233,34 @@ func (vm *multipassNode) stopVM() error {
 	}
 
 	if state == nodeStateRunning {
+		args := []string{
+			"drain",
+			vm.nodeName,
+			"--delete-local-data",
+			"--force",
+			"--ignore-daemonsets",
+			"--kubeconfig=/etc/kubernetes/config",
+		}
+
+		cmd = exec.Command("kubectl", args...)
+
+		if out, err := cmd.Output(); err != nil {
+			glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, string(out), err)
+		}
+
+		args = []string{
+			"delete",
+			"node",
+			vm.nodeName,
+			"--kubeconfig=/etc/kubernetes/config",
+		}
+
+		cmd = exec.Command("kubectl", args...)
+
+		if out, err := cmd.Output(); err != nil {
+			glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, string(out), err)
+		}
+
 		cmd = exec.Command("multipass", "stop", vm.nodeName)
 
 		if out, err = cmd.Output(); err != nil {
