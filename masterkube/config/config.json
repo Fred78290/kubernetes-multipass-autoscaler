@@ -1,61 +1,3 @@
-#/bin/bash
-KUBERNETES_VERSION=v1.12.3
-CURDIR=$(dirname $0)
-
-pushd $CURDIR
-
-export PATH=$PWD:$PATH
-
-rm -rf $PWD/../cluster/*
-rm -rf $PWD/../kubernetes/*
-
-echo "Delete masterkube previous instance"
-multipass delete masterkube -p &> /dev/null
-
-kubeconfig-delete.sh masterkube
-
-echo "Launch masterkube instance"
-
-multipass launch -n masterkube -m 4096 -c 2
-
-multipass mount $PWD masterkube:/masterkube/bin
-multipass mount $PWD/../cluster masterkube:/etc/cluster
-multipass mount $PWD/../kubernetes masterkube:/etc/kubernetes
-
-echo "Prepare masterkube instance"
-
-multipass shell masterkube <<EOF
-echo "Install update"
-sudo bash -c "export DEBIAN_FRONTEND=noninteractive ; apt-get update ; apt-get upgrade -y"
-echo "Install jq"
-sudo apt-get install jq -y
-echo "Install kubernetes"
-sudo bash -c "export PATH=/masterkube/bin:$PATH; install-kubernetes.sh $KUBERNETES_VERSION"
-sudo usermod -aG docker multipass
-exit
-EOF
-
-echo "Restart masterkube instance"
-
-multipass restart masterkube
-
-echo "Start kubernetes masterkube instance master node"
-
-multipass shell masterkube <<EOF
-sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; create-cluster.sh flannel ens3 $KUBERNETES_VERSION"
-exit
-EOF
-
-MASTER_IP=$(cat $PWD/../cluster/manager-ip)
-TOKEN=$(cat $PWD/../cluster/token)
-CACERT=$(cat $PWD/../cluster/ca.cert)
-SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-
-kubeconfig-merge.sh masterkube $PWD/../cluster/config
-
-echo "Write multipass cloudautoscaler provider config"
-
-cat > $PWD/../config/config.json <<EOF
 {
     "listen": "127.0.0.1:5200",
     "secret": "multipass",
@@ -64,8 +6,8 @@ cat > $PWD/../config/config.json <<EOF
     "nodePrice": 0.0,
     "podPrice": 0.0,
     "image": "bionic",
-    "auto-provision": true,
     "kubeconfig": "/etc/kubernetes/config",
+    "auto-provision": true,
     "optionals": {
         "pricing": false,
         "getAvailableMachineTypes": false,
@@ -75,9 +17,9 @@ cat > $PWD/../config/config.json <<EOF
         "deleteNodeGroup": false
     },
     "kubeadm": {
-        "address": "$MASTER_IP",
-        "token": "$TOKEN",
-        "ca": "sha256:$CACERT",
+        "address": "10.196.85.147:6443",
+        "token": "g93qcn.v0rpy9pkrv2war5f",
+        "ca": "sha256:db1bcef50ebac529f180bceae436c61ea6cf1f46c38f507c9e583b32a83c2c2e",
         "extras-args": [
             "--ignore-preflight-errors=All"
         ]
@@ -112,21 +54,21 @@ cat > $PWD/../config/config.json <<EOF
             "export RELEASE=v1.12.3",
             "curl https://get.docker.com | bash",
             "mkdir -p /opt/cni/bin",
-            "curl -L https://github.com/containernetworking/plugins/releases/download/\${CNI_VERSION}/cni-plugins-amd64-\${CNI_VERSION}.tgz | tar -C /opt/cni/bin -xz",
+            "curl -L https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-amd64-${CNI_VERSION}.tgz | tar -C /opt/cni/bin -xz",
             "mkdir -p /usr/local/bin",
-            "cd /usr/local/bin ; curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/\${RELEASE}/bin/linux/amd64/{kubeadm,kubelet,kubectl}",
+            "cd /usr/local/bin ; curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${RELEASE}/bin/linux/amd64/{kubeadm,kubelet,kubectl}",
             "chmod +x /usr/local/bin/kube*",
             "echo \"KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'\" > /etc/default/kubelet",
-            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/\${RELEASE}/build/debs/kubelet.service\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service",
+            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${RELEASE}/build/debs/kubelet.service\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service",
             "mkdir -p /etc/systemd/system/kubelet.service.d",
-            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/\${RELEASE}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
+            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${RELEASE}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
             "systemctl enable kubelet && systemctl restart kubelet",
-            "echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
+            "echo 'export PATH=/opt/cni/bin:$PATH' >> /etc/profile.d/apps-bin-path.sh",
             "kubeadm config images pull",
             "apt autoremove"
         ],
         "ssh_authorized_keys": [
-            "$SSH_KEY"
+            "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDhniyEBZs0t7aQZhn8gWfYrFacYJKQQx9x6pckZvMJIceLsQPB/J9CbqARtcCKZkK47yDzlH/zZNwt/AJvOawKZp6LDIWMOMF6TGicVhA+0RD3dOuqKRT0uJmaSo3Cz0GAaanTJXkhsEDZzaPkyLWXYaf6LxGAuMKCxv69j4H9ffGhRxNZ+62bs7DY+SH12hlcObZaz9GRydvEI/PUDghKJ4h1QKgvCKM1Mre1vQ2DHOuSifQC0Qbh0zK/JiJpHyBgFWRvKz72e2ya6+RW0ZuDGa6Qc3Zt8FIfH6eoiX+WOG7BUsXRN3n5gcWSXyYA9kxzBlNdMyYtD0fRlyb3+HgL"
         ],
         "users": [
             {
@@ -141,7 +83,7 @@ cat > $PWD/../config/config.json <<EOF
                 "sudo": "ALL=(ALL) NOPASSWD:ALL",
                 "shell": "/bin/bash",
                 "ssh_authorized_keys": [
-                    "$SSH_KEY"
+                    "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDhniyEBZs0t7aQZhn8gWfYrFacYJKQQx9x6pckZvMJIceLsQPB/J9CbqARtcCKZkK47yDzlH/zZNwt/AJvOawKZp6LDIWMOMF6TGicVhA+0RD3dOuqKRT0uJmaSo3Cz0GAaanTJXkhsEDZzaPkyLWXYaf6LxGAuMKCxv69j4H9ffGhRxNZ+62bs7DY+SH12hlcObZaz9GRydvEI/PUDghKJ4h1QKgvCKM1Mre1vQ2DHOuSifQC0Qbh0zK/JiJpHyBgFWRvKz72e2ya6+RW0ZuDGa6Qc3Zt8FIfH6eoiX+WOG7BUsXRN3n5gcWSXyYA9kxzBlNdMyYtD0fRlyb3+HgL"
                 ]
             }
         ],
@@ -158,6 +100,3 @@ cat > $PWD/../config/config.json <<EOF
         "~/Vagrant/data": "/data"
     }
 }
-EOF
-
-popd

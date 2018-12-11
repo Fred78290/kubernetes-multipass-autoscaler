@@ -92,8 +92,8 @@ if [ ! -f /etc/kubernetes/kubelet.conf ]; then
 
     echo "Retrieve token infos"
 
-    openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //' > $CLUSTER_DIR/ca.cert
-    kubeadm token list | grep "authentication,signing" | awk '{print $1}' > $CLUSTER_DIR/token
+    openssl x509 -pubkey -in /etc/kubernetes/pki/ca.crt | openssl rsa -pubin -outform der 2>/dev/null | openssl dgst -sha256 -hex | sed 's/^.* //' | tr -d '\n' > $CLUSTER_DIR/ca.cert
+    kubeadm token list | grep "authentication,signing" | awk '{print $1}'  | tr -d '\n' > $CLUSTER_DIR/token
 
     echo "Set local K8 environement"
 

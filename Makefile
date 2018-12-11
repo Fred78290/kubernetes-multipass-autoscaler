@@ -4,7 +4,7 @@ TAG?=dev
 FLAGS=
 ENVVAR=
 GOOS?=linux
-REGISTRY?=fred78290
+REGISTRY?=registry.gitlab.com/frederic.boltz/k8s-autoscaler
 BASEIMAGE?=k8s.gcr.io/debian-base-amd64:0.3.2
 ifdef BUILD_TAGS
   TAGS_FLAG=--tags ${BUILD_TAGS}

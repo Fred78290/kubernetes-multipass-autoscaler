@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	apigrpc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
 	apiv1 "k8s.io/api/core/v1"
@@ -23,33 +24,29 @@ const (
 
 var testNodeGroup = multipassNodeGroup{
 	identifier: testGroupID,
-	machine: &machineCharacteristic{
+	machine: &MachineCharacteristic{
 		Memory: 4096,
 		Vcpu:   4,
 		Disk:   5120,
 	},
-	created: false,
-	minSize: 0,
-	maxSize: 3,
-	nodes:   map[string]*multipassNode{},
+	status:       nodegroupNotCreated,
+	minSize:      0,
+	maxSize:      5,
+	pendingNodes: make(map[string]*multipassNode),
+	nodes:        make(map[string]*multipassNode),
 }
 
-func newTestServer(nodeGroup *multipassNodeGroup) (context.Context, *MultipassServer) {
+func newTestServer(nodeGroup *multipassNodeGroup) (*MultipassServer, context.Context, error) {
 
 	var config MultipassServerConfig
 
 	configStr, _ := ioutil.ReadFile("./masterkube/config/config.json")
 
-	json.Unmarshal(configStr, &config)
+	err := json.Unmarshal(configStr, &config)
 
-	bKubeHost, _ := ioutil.ReadFile("./masterkube/cluster/manager-ip")
-	kubeHost = strings.TrimSpace(string(bKubeHost))
-
-	bKubeToken, _ := ioutil.ReadFile("./masterkube/cluster/token")
-	kubeToken = strings.TrimSpace(string(bKubeToken))
-
-	bKubeCACert, _ := ioutil.ReadFile("./masterkube/cluster/ca.cert")
-	kubeCACert = strings.TrimSpace(string(bKubeCACert))
+	if err != nil {
+		return nil, nil, err
+	}
 
 	s := &MultipassServer{
 		resourceLimiter: &resourceLimiter{
@@ -59,10 +56,10 @@ func newTestServer(nodeGroup *multipassNodeGroup) (context.Context, *MultipassSe
 		nodeGroups: map[string]*multipassNodeGroup{},
 		config:     config,
 		kubeAdmConfig: &apigrpc.KubeAdmConfig{
-			KubeAdmToken:          kubeToken,
-			KubeAdmAddress:        kubeHost,
-			KubeAdmCACert:         kubeCACert,
-			KubeAdmExtraArguments: kubeExtraArgs,
+			KubeAdmAddress:        config.KubeAdm.Address,
+			KubeAdmToken:          config.KubeAdm.Token,
+			KubeAdmCACert:         config.KubeAdm.CACert,
+			KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
 		},
 	}
 
@@ -70,7 +67,7 @@ func newTestServer(nodeGroup *multipassNodeGroup) (context.Context, *MultipassSe
 		s.nodeGroups[nodeGroup.identifier] = nodeGroup
 	}
 
-	return nil, s
+	return s, nil, nil
 }
 
 func extractNodeGroup(nodeGroups []*apigrpc.NodeGroup) []string {
@@ -103,14 +100,15 @@ func TestMultipassServer_NodeGroups(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -123,18 +121,20 @@ func TestMultipassServer_NodeGroups(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.NodeGroups(ctx, tt.request)
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.NodeGroups(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.NodeGroups() error = %v, wantErr %v", err, tt.wantErr)
-			} else if !reflect.DeepEqual(extractNodeGroup(got.GetNodeGroups()), tt.want) {
-				t.Errorf("MultipassServer.NodeGroups() = %v, want %v", extractNodeGroup(got.GetNodeGroups()), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.NodeGroups() error = %v, wantErr %v", err, tt.wantErr)
+				} else if !reflect.DeepEqual(extractNodeGroup(got.GetNodeGroups()), tt.want) {
+					t.Errorf("MultipassServer.NodeGroups() = %v, want %v", extractNodeGroup(got.GetNodeGroups()), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -163,14 +163,15 @@ func TestMultipassServer_NodeGroupForNode(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -183,20 +184,22 @@ func TestMultipassServer_NodeGroupForNode(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.NodeGroupForNode(ctx, tt.request)
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.NodeGroupForNode(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.NodeGroupForNode() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.NodeGroupForNode() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(got.GetNodeGroup().GetId(), tt.want) {
-				t.Errorf("MultipassServer.NodeGroupForNode() = %v, want %v", got.GetNodeGroup().GetId(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.NodeGroupForNode() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.NodeGroupForNode() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if !reflect.DeepEqual(got.GetNodeGroup().GetId(), tt.want) {
+					t.Errorf("MultipassServer.NodeGroupForNode() = %v, want %v", got.GetNodeGroup().GetId(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -216,20 +219,22 @@ func TestMultipassServer_Pricing(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.Pricing(ctx, tt.request)
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.Pricing(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Pricing() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Pricing() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), tt.want) {
-				t.Errorf("MultipassServer.Pricing() = %v, want %v", got.GetPriceModel().GetId(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Pricing() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Pricing() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if !reflect.DeepEqual(got.GetPriceModel().GetId(), tt.want) {
+					t.Errorf("MultipassServer.Pricing() = %v, want %v", got.GetPriceModel().GetId(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -264,21 +269,23 @@ func TestMultipassServer_GetAvailableMachineTypes(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.GetAvailableMachineTypes(ctx, tt.request)
+				got, err := s.GetAvailableMachineTypes(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.GetAvailableMachineTypes() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.GetAvailableMachineTypes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractAvailableMachineTypes(got.GetAvailableMachineTypes()), tt.want) {
-				t.Errorf("MultipassServer.GetAvailableMachineTypes() = %v, want %v", extractAvailableMachineTypes(got.GetAvailableMachineTypes()), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.GetAvailableMachineTypes() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.GetAvailableMachineTypes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if !reflect.DeepEqual(extractAvailableMachineTypes(got.GetAvailableMachineTypes()), tt.want) {
+					t.Errorf("MultipassServer.GetAvailableMachineTypes() = %v, want %v", extractAvailableMachineTypes(got.GetAvailableMachineTypes()), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -302,21 +309,23 @@ func TestMultipassServer_NewNodeGroup(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.NewNodeGroup(ctx, tt.request)
+				got, err := s.NewNodeGroup(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.NewNodeGroup() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.NewNodeGroup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else {
-				t.Logf("MultipassServer.NewNodeGroup() return node group created :%v", got.GetNodeGroup().GetId())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.NewNodeGroup() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.NewNodeGroup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else {
+					t.Logf("MultipassServer.NewNodeGroup() return node group created :%v", got.GetNodeGroup().GetId())
+				}
+			})
+		}
 	}
 }
 
@@ -348,20 +357,22 @@ func TestMultipassServer_GetResourceLimiter(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.GetResourceLimiter(ctx, tt.request)
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.GetResourceLimiter(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.GetResourceLimiter() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.GetResourceLimiter() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractResourceLimiter(got.GetResourceLimiter()), tt.want) {
-				t.Errorf("MultipassServer.GetResourceLimiter() = %v, want %v", got.GetResourceLimiter(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.GetResourceLimiter() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.GetResourceLimiter() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if !reflect.DeepEqual(extractResourceLimiter(got.GetResourceLimiter()), tt.want) {
+					t.Errorf("MultipassServer.GetResourceLimiter() = %v, want %v", got.GetResourceLimiter(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -380,19 +391,21 @@ func TestMultipassServer_Cleanup(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Cleanup(ctx, tt.request)
+				got, err := s.Cleanup(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Cleanup() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Cleanup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Cleanup() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Cleanup() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -411,19 +424,21 @@ func TestMultipassServer_Refresh(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Refresh(ctx, tt.request)
+				got, err := s.Refresh(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Refresh() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Refresh() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Refresh() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Refresh() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -444,19 +459,21 @@ func TestMultipassServer_MaxSize(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.MaxSize(ctx, tt.request)
+				got, err := s.MaxSize(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.MaxSize() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetMaxSize() != tt.want {
-				t.Errorf("MultipassServer.MaxSize() = %v, want %v", got.GetMaxSize(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.MaxSize() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetMaxSize() != tt.want {
+					t.Errorf("MultipassServer.MaxSize() = %v, want %v", got.GetMaxSize(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -477,19 +494,21 @@ func TestMultipassServer_MinSize(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.MinSize(ctx, tt.request)
+				got, err := s.MinSize(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.MinSize() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetMinSize() != tt.want {
-				t.Errorf("MultipassServer.MinSize() = %v, want %v", got.GetMinSize(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.MinSize() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetMinSize() != tt.want {
+					t.Errorf("MultipassServer.MinSize() = %v, want %v", got.GetMinSize(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -510,21 +529,23 @@ func TestMultipassServer_TargetSize(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.TargetSize(ctx, tt.request)
+				got, err := s.TargetSize(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.TargetSize() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.TargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetTargetSize() != tt.want {
-				t.Errorf("MultipassServer.TargetSize() = %v, want %v", got.GetTargetSize(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.TargetSize() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.TargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if got.GetTargetSize() != tt.want {
+					t.Errorf("MultipassServer.TargetSize() = %v, want %v", got.GetTargetSize(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -544,19 +565,21 @@ func TestMultipassServer_IncreaseSize(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.IncreaseSize(ctx, tt.request)
+				got, err := s.IncreaseSize(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.IncreaseSize() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.IncreaseSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.IncreaseSize() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.IncreaseSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -586,14 +609,15 @@ func TestMultipassServer_DeleteNodes(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -606,19 +630,21 @@ func TestMultipassServer_DeleteNodes(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.DeleteNodes(ctx, tt.request)
+				got, err := s.DeleteNodes(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.DeleteNodes() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.DeleteNodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.DeleteNodes() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.DeleteNodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -640,14 +666,15 @@ func TestMultipassServer_DecreaseTargetSize(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -660,19 +687,21 @@ func TestMultipassServer_DecreaseTargetSize(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.DecreaseTargetSize(ctx, tt.request)
+				got, err := s.DecreaseTargetSize(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.DecreaseTargetSize() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.DecreaseTargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.DecreaseTargetSize() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.DecreaseTargetSize() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -693,19 +722,21 @@ func TestMultipassServer_Id(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Id(ctx, tt.request)
+				got, err := s.Id(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Id() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetResponse() != tt.want {
-				t.Errorf("MultipassServer.Id() = %v, want %v", got, tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Id() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetResponse() != tt.want {
+					t.Errorf("MultipassServer.Id() = %v, want %v", got, tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -724,17 +755,19 @@ func TestMultipassServer_Debug(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			_, err := s.Debug(ctx, tt.request)
+				_, err := s.Debug(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Debug() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Debug() error = %v, wantErr %v", err, tt.wantErr)
+				}
+			})
+		}
 	}
 }
 
@@ -769,14 +802,15 @@ func TestMultipassServer_Nodes(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -789,20 +823,22 @@ func TestMultipassServer_Nodes(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.Nodes(ctx, tt.request)
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.Nodes(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Nodes() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Nodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if !reflect.DeepEqual(extractInstanceID(got.GetInstances()), tt.want) {
-				t.Errorf("MultipassServer.Nodes() = %v, want %v", extractInstanceID(got.GetInstances()), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Nodes() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Nodes() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if !reflect.DeepEqual(extractInstanceID(got.GetInstances()), tt.want) {
+					t.Errorf("MultipassServer.Nodes() = %v, want %v", extractInstanceID(got.GetInstances()), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -826,19 +862,21 @@ func TestMultipassServer_TemplateNodeInfo(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.TemplateNodeInfo(ctx, tt.request)
+				got, err := s.TemplateNodeInfo(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.TemplateNodeInfo() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.TemplateNodeInfo() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.TemplateNodeInfo() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.TemplateNodeInfo() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -860,19 +898,21 @@ func TestMultipassServer_Exist(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Exist(ctx, tt.request)
+				got, err := s.Exist(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Exist() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetExists() != tt.want {
-				t.Errorf("MultipassServer.Exist() = %v, want %v", got.GetExists(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Exist() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetExists() != tt.want {
+					t.Errorf("MultipassServer.Exist() = %v, want %v", got.GetExists(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -894,21 +934,23 @@ func TestMultipassServer_Create(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Create(ctx, tt.request)
+				got, err := s.Create(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Create() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Create() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetNodeGroup().GetId() != tt.want {
-				t.Errorf("MultipassServer.Create() = %v, want %v", got.GetNodeGroup().GetId(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Create() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Create() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if got.GetNodeGroup().GetId() != tt.want {
+					t.Errorf("MultipassServer.Create() = %v, want %v", got.GetNodeGroup().GetId(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -930,14 +972,15 @@ func TestMultipassServer_Delete(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -950,19 +993,21 @@ func TestMultipassServer_Delete(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Delete(ctx, tt.request)
+				got, err := s.Delete(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Delete() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Delete() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Delete() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Delete() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				}
+			})
+		}
 	}
 }
 
@@ -983,19 +1028,21 @@ func TestMultipassServer_Autoprovisioned(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Autoprovisioned(ctx, tt.request)
+				got, err := s.Autoprovisioned(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Autoprovisioned() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetAutoprovisioned() != tt.want {
-				t.Errorf("MultipassServer.Autoprovisioned() = %v, want %v", got.GetAutoprovisioned(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Autoprovisioned() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetAutoprovisioned() != tt.want {
+					t.Errorf("MultipassServer.Autoprovisioned() = %v, want %v", got.GetAutoprovisioned(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -1041,14 +1088,15 @@ func TestMultipassServer_Belongs(t *testing.T) {
 
 	ng := multipassNodeGroup{
 		identifier: testGroupID,
-		machine: &machineCharacteristic{
+		machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		created: false,
-		minSize: 0,
-		maxSize: 3,
+		status:       nodegroupNotCreated,
+		minSize:      0,
+		maxSize:      5,
+		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
 				nodeName: testNodeName,
@@ -1061,21 +1109,23 @@ func TestMultipassServer_Belongs(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&ng)
+	s, ctx, err := newTestServer(&ng)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.Belongs(ctx, tt.request)
+				got, err := s.Belongs(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.Belongs() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.Belongs() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetBelongs() != tt.want {
-				t.Errorf("MultipassServer.Belongs() = %v, want %v", got.GetBelongs(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.Belongs() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.Belongs() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if got.GetBelongs() != tt.want {
+					t.Errorf("MultipassServer.Belongs() = %v, want %v", got.GetBelongs(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -1103,21 +1153,23 @@ func TestMultipassServer_NodePrice(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
 
-			got, err := s.NodePrice(ctx, tt.request)
+				got, err := s.NodePrice(ctx, tt.request)
 
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.NodePrice() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.NodePrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetPrice() != tt.want {
-				t.Errorf("MultipassServer.NodePrice() = %v, want %v", got.GetPrice(), tt.want)
-			}
-		})
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.NodePrice() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.NodePrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if got.GetPrice() != tt.want {
+					t.Errorf("MultipassServer.NodePrice() = %v, want %v", got.GetPrice(), tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -1146,18 +1198,20 @@ func TestMultipassServer_PodPrice(t *testing.T) {
 		},
 	}
 
-	ctx, s := newTestServer(&testNodeGroup)
+	s, ctx, err := newTestServer(&testNodeGroup)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := s.PodPrice(ctx, tt.request)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("MultipassServer.PodPrice() error = %v, wantErr %v", err, tt.wantErr)
-			} else if got.GetError() != nil {
-				t.Errorf("MultipassServer.PodPrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
-			} else if got.GetPrice() != tt.want {
-				t.Errorf("MultipassServer.PodPrice() = %v, want %v", got.GetPrice(), tt.want)
-			}
-		})
+	if assert.NoError(t, err) {
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				got, err := s.PodPrice(ctx, tt.request)
+				if (err != nil) != tt.wantErr {
+					t.Errorf("MultipassServer.PodPrice() error = %v, wantErr %v", err, tt.wantErr)
+				} else if got.GetError() != nil {
+					t.Errorf("MultipassServer.PodPrice() return an error, code = %v, reason = %s", got.GetError().GetCode(), got.GetError().GetReason())
+				} else if got.GetPrice() != tt.want {
+					t.Errorf("MultipassServer.PodPrice() = %v, want %v", got.GetPrice(), tt.want)
+				}
+			})
+		}
 	}
 }

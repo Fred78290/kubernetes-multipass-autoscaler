@@ -7,17 +7,27 @@ import (
 	"github.com/golang/glog"
 )
 
+type nodegroupState int32
+
+const (
+	nodegroupNotCreated nodegroupState = 0
+	nodegroupCreated    nodegroupState = 1
+	nodegroupDeleting   nodegroupState = 2
+	nodegroupDeleted    nodegroupState = 3
+)
+
 // Group all multipass VM created inside a NodeGroup
 // Each node have name like <node group name>-vm-<vm index>
 type multipassNodeGroup struct {
 	sync.Mutex
-	identifier string
-	machine    *machineCharacteristic
-	created    bool
-	minSize    int
-	maxSize    int
-	queueSize  int
-	nodes      map[string]*multipassNode
+	identifier     string
+	machine        *MachineCharacteristic
+	status         nodegroupState
+	minSize        int
+	maxSize        int
+	nodes          map[string]*multipassNode
+	pendingNodes   map[string]*multipassNode
+	pendingNodesWG sync.WaitGroup
 }
 
 type nodeCreationExtra struct {
@@ -25,29 +35,45 @@ type nodeCreationExtra struct {
 	kubeToken     string
 	kubeCACert    string
 	kubeExtraArgs []string
+	kubeConfig    string
 	image         string
 	cloudInit     *map[string]interface{}
 	mountPoints   *map[string]string
 	autoprovision bool
 }
 
-func (g *multipassNodeGroup) cleanup() error {
+func (g *multipassNodeGroup) cleanup(kubeconfig string) error {
+	glog.V(5).Infof("multipassNodeGroup::cleanup, nodeGroupID:%s", g.identifier)
+
+	var lastError error
+
+	g.status = nodegroupDeleting
+
+	g.pendingNodesWG.Wait()
+
+	glog.V(5).Infof("multipassNodeGroup::cleanup, nodeGroupID:%s, iterate node to delete", g.identifier)
+
 	for _, node := range g.nodes {
-		if err := node.deleteVM(); err != nil {
-			glog.Errorf(errNodeGroupCleanupFailOnVM, g.identifier, node.nodeName, err)
+		if lastError = node.deleteVM(kubeconfig); lastError != nil {
+			glog.Errorf(errNodeGroupCleanupFailOnVM, g.identifier, node.nodeName, lastError)
 		}
 	}
 
 	g.nodes = make(map[string]*multipassNode)
+	g.pendingNodes = make(map[string]*multipassNode)
+	g.status = nodegroupDeleted
 
-	return nil
+	return lastError
 }
 
 func (g *multipassNodeGroup) targetSize() int {
-	return g.queueSize + len(g.nodes)
+	glog.V(5).Infof("multipassNodeGroup::targetSize, nodeGroupID:%s", g.identifier)
+
+	return len(g.pendingNodes) + len(g.nodes)
 }
 
 func (g *multipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("multipassNodeGroup::setNodeGroupSize, nodeGroupID:%s", g.identifier)
 
 	var err error
 
@@ -56,7 +82,7 @@ func (g *multipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationE
 	delta := newSize - g.targetSize()
 
 	if delta < 0 {
-		err = g.deleteNodes(delta)
+		err = g.deleteNodes(delta, extras)
 	} else if delta > 0 {
 		err = g.addNodes(delta, extras)
 	}
@@ -66,8 +92,17 @@ func (g *multipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationE
 	return err
 }
 
+func (g *multipassNodeGroup) refresh() {
+	glog.V(5).Infof("multipassNodeGroup::refresh, nodeGroupID:%s", g.identifier)
+
+	for _, node := range g.nodes {
+		node.statusVM()
+	}
+}
+
 // delta must be negative!!!!
-func (g *multipassNodeGroup) deleteNodes(delta int) error {
+func (g *multipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("multipassNodeGroup::deleteNodes, nodeGroupID:%s", g.identifier)
 
 	startIndex := len(g.nodes) - 1
 	endIndex := startIndex + delta
@@ -77,7 +112,7 @@ func (g *multipassNodeGroup) deleteNodes(delta int) error {
 		nodeName := g.nodeName(nodeIndex)
 
 		if node := g.nodes[nodeName]; node != nil {
-			if err := node.deleteVM(); err != nil {
+			if err := node.deleteVM(extras.kubeConfig); err != nil {
 				glog.Errorf(errUnableToDeleteVM, node.nodeName)
 				return err
 			}
@@ -94,14 +129,20 @@ func (g *multipassNodeGroup) deleteNodes(delta int) error {
 }
 
 func (g *multipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s", g.identifier)
 
-	g.queueSize = delta
-
-	startIndex := len(g.nodes)
+	startIndex := g.targetSize()
 	endIndex := startIndex + delta
 	tempNodes := make([]*multipassNode, 0, delta)
 
+	g.pendingNodesWG.Add(delta)
+
 	for nodeIndex := startIndex; nodeIndex < endIndex; nodeIndex++ {
+		if g.status != nodegroupCreated {
+			glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.identifier)
+			break
+		}
+
 		node := &multipassNode{
 			nodeName: g.nodeName(nodeIndex),
 			memory:   g.machine.Memory,
@@ -110,38 +151,49 @@ func (g *multipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 		}
 
 		tempNodes = append(tempNodes, node)
+
+		g.pendingNodes[node.nodeName] = node
 	}
 
 	for _, node := range tempNodes {
-		g.queueSize--
+		if g.status != nodegroupCreated {
+			glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.identifier)
+			break
+		}
 
 		if err := node.launchVM(extras); err != nil {
-			glog.Errorf(errUnableToLaunchVM, node.nodeName)
+			glog.Errorf(errUnableToLaunchVM, node.nodeName, err)
 
 			for _, node := range tempNodes {
-				if node.state == nodeStateRunning {
-					if err := node.deleteVM(); err != nil {
+				delete(g.pendingNodes, node.nodeName)
+
+				if status, _ := node.statusVM(); status == nodeStateRunning {
+					if err := node.deleteVM(extras.kubeConfig); err != nil {
 						glog.Errorf(errUnableToDeleteVM, node.nodeName)
 					}
 				}
+
+				g.pendingNodesWG.Done()
 			}
 
 			return err
 		}
-	}
 
-	for _, node := range tempNodes {
+		delete(g.pendingNodes, node.nodeName)
+
 		g.nodes[node.nodeName] = node
+		g.pendingNodesWG.Done()
 	}
 
 	return nil
 }
 
-func (g *multipassNodeGroup) deleteNodeByName(nodeName string) error {
+func (g *multipassNodeGroup) deleteNodeByName(kubeconfig, nodeName string) error {
+	glog.V(5).Infof("multipassNodeGroup::deleteNodeByName, nodeGroupID:%s", g.identifier)
 
 	if node := g.nodes[nodeName]; node != nil {
 
-		if err := node.deleteVM(); err != nil {
+		if err := node.deleteVM(kubeconfig); err != nil {
 			glog.Errorf(errUnableToDeleteVM, node.nodeName)
 			return err
 		}
@@ -154,8 +206,10 @@ func (g *multipassNodeGroup) deleteNodeByName(nodeName string) error {
 	return fmt.Errorf(errNodeNotFoundInNodeGroup, nodeName, g.identifier)
 }
 
-func (g *multipassNodeGroup) deleteNodeGroup() error {
-	return g.cleanup()
+func (g *multipassNodeGroup) deleteNodeGroup(kubeConfig string) error {
+	glog.V(5).Infof("multipassNodeGroup::deleteNodeGroup, nodeGroupID:%s", g.identifier)
+
+	return g.cleanup(kubeConfig)
 }
 
 func (g *multipassNodeGroup) nodeName(vmIndex int) string {

@@ -19,7 +19,6 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -35,27 +34,8 @@ import (
 func main() {
 	var config MultipassServerConfig
 
-	glog.V(2).Infof("Start listening server")
-
 	configPtr := flag.String("config", "/etc/default/multipass-cluster-autoscaler.json", "The config for the server")
-	tokenPtr := flag.String("token", "", "Token to use with kubeadm join")
-	joinPtr := flag.String("host", "", "Address:port to use with kubeadm join")
-	caPtr := flag.String("discovery-token-ca-cert-hash", "", "CA cert")
 	flag.Parse()
-
-	kubeAdmExtras := flag.Args()
-
-	if tokenPtr == nil || len(*tokenPtr) == 0 {
-		glog.Fatalf("Kubeadm join token is not defined")
-	}
-
-	if joinPtr == nil || len(*joinPtr) == 0 {
-		glog.Fatalf("Kubeadm join address is not defined")
-	}
-
-	if caPtr == nil || len(*caPtr) == 0 {
-		glog.Fatalf("Kubeadm join discovery-token-ca-cert-hash is not defined")
-	}
 
 	file, err := os.Open(*configPtr)
 	if err != nil {
@@ -68,7 +48,9 @@ func main() {
 		glog.Fatalf("failed to decode config file:%s, error:%v", *configPtr, err)
 	}
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("%s:%d", config.Address, config.Port))
+	glog.V(2).Infof("Start listening server")
+
+	lis, err := net.Listen("tcp", config.Listen)
 
 	if err != nil {
 		glog.Fatalf("failed to listen: %v", err)
@@ -76,11 +58,22 @@ func main() {
 
 	server := grpc.NewServer()
 
+	if config.Optionals == nil {
+		config.Optionals = &MultipassServerOptionals{
+			Pricing:                  false,
+			GetAvailableMachineTypes: false,
+			NewNodeGroup:             false,
+			TemplateNodeInfo:         false,
+			Create:                   false,
+			Delete:                   false,
+		}
+	}
+
 	kubeAdmConfig := &apigrc.KubeAdmConfig{
-		KubeAdmAddress:        *joinPtr,
-		KubeAdmToken:          *tokenPtr,
-		KubeAdmCACert:         *caPtr,
-		KubeAdmExtraArguments: kubeAdmExtras,
+		KubeAdmAddress:        config.KubeAdm.Address,
+		KubeAdmToken:          config.KubeAdm.Token,
+		KubeAdmCACert:         config.KubeAdm.CACert,
+		KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
 	}
 
 	multipassserver := &MultipassServer{

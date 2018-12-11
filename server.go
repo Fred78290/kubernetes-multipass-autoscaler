@@ -15,26 +15,48 @@ type resourceLimiter struct {
 	maxLimits map[string]int64
 }
 
-type machineCharacteristic struct {
+// MachineCharacteristic defines VM kind
+type MachineCharacteristic struct {
 	Memory int `json:"memsize"`  // VM Memory size in megabytes
 	Vcpu   int `json:"vcpus"`    // VM number of cpus
 	Disk   int `json:"disksize"` // VM disk size in megabytes
 }
 
+// KubeJoinConfig give element to join kube master
+type KubeJoinConfig struct {
+	Address        string   `json:"address,omitempty"`
+	Token          string   `json:"token,omitempty"`
+	CACert         string   `json:"ca,omitempty"`
+	ExtraArguments []string `json:"extras-args,omitempty"`
+}
+
+// MultipassServerOptionals declare wich features must be optional
+type MultipassServerOptionals struct {
+	Pricing                  bool `json:"pricing"`
+	GetAvailableMachineTypes bool `json:"getAvailableMachineTypes"`
+	NewNodeGroup             bool `json:"newNodeGroup"`
+	TemplateNodeInfo         bool `json:"templateNodeInfo"`
+	Create                   bool `json:"create"`
+	Delete                   bool `json:"delete"`
+}
+
 // MultipassServerConfig is contains configuration
 type MultipassServerConfig struct {
-	Address       string                            `default:"0.0.0.0" json:"address"`             // Mandatory, Address to listen
-	Port          int                               `default:"5200" json:"port"`                   // Mandatory, Port to listen
-	ProviderID    string                            `json:"secret"`                                // Mandatory, secret Identifier, client must match this
-	MinNode       int                               `json:"minNode"`                               // Mandatory, Min Multipass VM
-	MaxNode       int                               `json:"maxNode"`                               // Mandatory, Max Multipass VM
-	NodePrice     float64                           `json:"nodePrice"`                             // Optional, The VM price
-	PodPrice      float64                           `json:"podPrice"`                              // Optional, The pod price
-	Image         string                            `json:"image"`                                 // Optional, URL to multipass image or image name
-	Machines      map[string]*machineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
+	Listen        string                            `default:"0.0.0.0:5200" json:"listen"` // Mandatory, Address to listen
+	ProviderID    string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
+	MinNode       int                               `json:"minNode"`                       // Mandatory, Min Multipass VM
+	MaxNode       int                               `json:"maxNode"`                       // Mandatory, Max Multipass VM
+	NodePrice     float64                           `json:"nodePrice"`                     // Optional, The VM price
+	PodPrice      float64                           `json:"podPrice"`                      // Optional, The pod price
+	Autoprovision bool                              `default:"true" json:"autoprovision"`  // Mandatory, run kubeadm join or not
+	Image         string                            `json:"image"`                         // Optional, URL to multipass image or image name
+	KubeCtlConfig string                            `default:"/etc/kubernetes/config" json:"kubeconfig"`
+	KubeAdm       KubeJoinConfig                    `json:"kubeadm"`
+	Machines      map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
 	CloudInit     map[string]interface{}            `json:"cloud-init"`                            // Optional, The cloud init conf file
 	MountPoints   map[string]string                 `json:"mount-points"`                          // Optional, mount point between host and guest
 	AutoProvision bool                              `default:"true" json:"auto-provision"`
+	Optionals     *MultipassServerOptionals         `json:"optionals"`
 }
 
 // MultipassServer declare multipass grpc server
@@ -63,11 +85,13 @@ func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string) (
 	}
 
 	nodeGroup := &multipassNodeGroup{
-		identifier: nodeGroupID,
-		machine:    machine,
-		nodes:      make(map[string]*multipassNode),
-		minSize:    s.config.MinNode,
-		maxSize:    s.config.MaxNode,
+		identifier:   nodeGroupID,
+		machine:      machine,
+		status:       nodegroupNotCreated,
+		pendingNodes: make(map[string]*multipassNode),
+		nodes:        make(map[string]*multipassNode),
+		minSize:      s.config.MinNode,
+		maxSize:      s.config.MaxNode,
 	}
 
 	s.nodeGroups[nodeGroupID] = nodeGroup
@@ -83,7 +107,7 @@ func (s *MultipassServer) deleteNodeGroup(nodeGroupID string) error {
 		return fmt.Errorf(errNodeGroupNotFound, nodeGroupID)
 	}
 
-	if err := nodeGroup.deleteNodeGroup(); err != nil {
+	if err := nodeGroup.deleteNodeGroup(s.config.KubeCtlConfig); err != nil {
 		glog.Errorf(errUnableToDeleteNodeGroup, nodeGroupID, err)
 		return err
 	}
@@ -101,7 +125,7 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 		return nil, fmt.Errorf(errNodeGroupNotFound, nodeGroupID)
 	}
 
-	if nodeGroup.created == false {
+	if nodeGroup.status == nodegroupNotCreated {
 		// Must launch minNode VM
 		if nodeGroup.minSize > 0 {
 
@@ -110,6 +134,7 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 				s.kubeAdmConfig.KubeAdmToken,
 				s.kubeAdmConfig.KubeAdmCACert,
 				s.kubeAdmConfig.KubeAdmExtraArguments,
+				s.config.KubeCtlConfig,
 				s.config.Image,
 				&s.config.CloudInit,
 				&s.config.MountPoints,
@@ -122,7 +147,7 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 			}
 		}
 
-		nodeGroup.created = true
+		nodeGroup.status = nodegroupCreated
 	}
 
 	return nodeGroup, nil
@@ -180,10 +205,13 @@ func (s *MultipassServer) NodeGroups(ctx context.Context, request *apigrpc.Cloud
 
 	nodeGroups := make([]*apigrpc.NodeGroup, 0, len(s.nodeGroups))
 
-	for n := range s.nodeGroups {
-		nodeGroups = append(nodeGroups, &apigrpc.NodeGroup{
-			Id: n,
-		})
+	for name, nodeGroup := range s.nodeGroups {
+		// Return node group if created
+		if nodeGroup.status == nodegroupCreated {
+			nodeGroups = append(nodeGroups, &apigrpc.NodeGroup{
+				Id: name,
+			})
+		}
 	}
 
 	return &apigrpc.NodeGroupsReply{
@@ -270,6 +298,10 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 func (s *MultipassServer) Pricing(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.PricingModelReply, error) {
 	glog.V(2).Infof("Call server Pricing: %v", request)
 
+	if s.config.Optionals.Pricing {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
+
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
@@ -288,6 +320,10 @@ func (s *MultipassServer) Pricing(ctx context.Context, request *apigrpc.CloudPro
 // Implementation optional.
 func (s *MultipassServer) GetAvailableMachineTypes(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.AvailableMachineTypesReply, error) {
 	glog.V(2).Infof("Call server GetAvailableMachineTypes: %v", request)
+
+	if s.config.Optionals.GetAvailableMachineTypes {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
 
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
@@ -315,6 +351,10 @@ func (s *MultipassServer) GetAvailableMachineTypes(ctx context.Context, request 
 func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.NewNodeGroupRequest) (*apigrpc.NewNodeGroupReply, error) {
 	glog.V(2).Infof("Call server NewNodeGroup: %v", request)
 
+	if s.config.Optionals.NewNodeGroup {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
+
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
@@ -335,7 +375,15 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 		}, nil
 	}
 
-	nodeGroupIdentifier := s.generateNodeGroupName()
+	var nodeGroupIdentifier string
+
+	request.GetLabels()
+	if request.GetLabels() != nil && len(request.GetLabels()["clusterscaler.nodegroup/name"]) == 0 {
+		nodeGroupIdentifier = s.generateNodeGroupName()
+	} else {
+		nodeGroupIdentifier = request.GetLabels()["clusterscaler.nodegroup/name"]
+	}
+
 	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMachineType())
 
 	if err != nil {
@@ -391,13 +439,17 @@ func (s *MultipassServer) Cleanup(ctx context.Context, request *apigrpc.CloudPro
 	}
 
 	for _, nodeGroup := range s.nodeGroups {
-		if err := nodeGroup.cleanup(); err != nil {
+		if err := nodeGroup.cleanup(s.config.KubeCtlConfig); err != nil {
 			lastError = &apigrpc.Error{
 				Code:   cloudProviderError,
 				Reason: err.Error(),
 			}
 		}
 	}
+
+	glog.V(5).Info("Leave server Cleanup, done")
+
+	s.nodeGroups = make(map[string]*multipassNodeGroup)
 
 	return &apigrpc.CleanupReply{
 		Error: lastError,
@@ -412,6 +464,10 @@ func (s *MultipassServer) Refresh(ctx context.Context, request *apigrpc.CloudPro
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
+	}
+
+	for _, ng := range s.nodeGroups {
+		ng.refresh()
 	}
 
 	return &apigrpc.RefreshReply{
@@ -432,9 +488,9 @@ func (s *MultipassServer) MaxSize(ctx context.Context, request *apigrpc.NodeGrou
 
 	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
 
-	if nodeGroup != nil {
+	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
-
+	} else {
 		maxSize = nodeGroup.maxSize
 	}
 
@@ -455,9 +511,9 @@ func (s *MultipassServer) MinSize(ctx context.Context, request *apigrpc.NodeGrou
 
 	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
 
-	if nodeGroup != nil {
+	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
-
+	} else {
 		minSize = nodeGroup.minSize
 	}
 
@@ -553,6 +609,7 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 		s.kubeAdmConfig.KubeAdmToken,
 		s.kubeAdmConfig.KubeAdmCACert,
 		s.kubeAdmConfig.KubeAdmExtraArguments,
+		s.config.KubeCtlConfig,
 		s.config.Image,
 		&s.config.CloudInit,
 		&s.config.MountPoints,
@@ -653,7 +710,7 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		// Delete the node in the group
 		nodeName, err = nodeNameFromProviderID(s.config.ProviderID, nodeName)
 
-		err = nodeGroup.deleteNodeByName(nodeName)
+		err = nodeGroup.deleteNodeByName(nodeName, s.config.KubeCtlConfig)
 
 		if err != nil {
 			return &apigrpc.DeleteNodesReply{
@@ -725,6 +782,7 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 		s.kubeAdmConfig.KubeAdmToken,
 		s.kubeAdmConfig.KubeAdmCACert,
 		s.kubeAdmConfig.KubeAdmExtraArguments,
+		s.config.KubeCtlConfig,
 		s.config.Image,
 		&s.config.CloudInit,
 		&s.config.MountPoints,
@@ -847,6 +905,10 @@ func (s *MultipassServer) Nodes(ctx context.Context, request *apigrpc.NodeGroupS
 func (s *MultipassServer) TemplateNodeInfo(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.TemplateNodeInfoReply, error) {
 	glog.V(2).Infof("Call server TemplateNodeInfo: %v", request)
 
+	if s.config.Optionals.TemplateNodeInfo {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
+
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
@@ -902,6 +964,10 @@ func (s *MultipassServer) Exist(ctx context.Context, request *apigrpc.NodeGroupS
 func (s *MultipassServer) Create(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.CreateReply, error) {
 	glog.V(2).Infof("Call server Create: %v", request)
 
+	if s.config.Optionals.Create {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
+
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
@@ -936,6 +1002,10 @@ func (s *MultipassServer) Create(ctx context.Context, request *apigrpc.NodeGroup
 // Implementation optional.
 func (s *MultipassServer) Delete(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.DeleteReply, error) {
 	glog.V(2).Infof("Call server Delete: %v", request)
+
+	if s.config.Optionals.Delete {
+		return nil, fmt.Errorf(errNotImplemented)
+	}
 
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
