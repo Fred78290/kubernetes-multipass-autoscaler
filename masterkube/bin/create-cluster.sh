@@ -97,8 +97,9 @@ if [ ! -f /etc/kubernetes/kubelet.conf ]; then
 
     echo "Set local K8 environement"
 
-    su -c kubeconfig-install.sh kubernetes
-    su -c kubeconfig-install.sh root
+    mkdir -p $HOME/.kube
+    cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+    chown $(id -u):$(id -g) $HOME/.kube/config
 
     cp /etc/kubernetes/admin.conf $CLUSTER_DIR/config
 
