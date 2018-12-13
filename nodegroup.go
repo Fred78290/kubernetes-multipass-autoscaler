@@ -189,7 +189,7 @@ func (g *multipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 }
 
 func (g *multipassNodeGroup) deleteNodeByName(kubeconfig, nodeName string) error {
-	glog.V(5).Infof("multipassNodeGroup::deleteNodeByName, nodeGroupID:%s", g.identifier)
+	glog.V(5).Infof("multipassNodeGroup::deleteNodeByName, nodeGroupID:%s, nodeName:%s", g.identifier, nodeName)
 
 	if node := g.nodes[nodeName]; node != nil {
 
