@@ -710,7 +710,7 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		// Delete the node in the group
 		nodeName, err = nodeNameFromProviderID(s.config.ProviderID, nodeName)
 
-		err = nodeGroup.deleteNodeByName(nodeName, s.config.KubeCtlConfig)
+		err = nodeGroup.deleteNodeByName(s.config.KubeCtlConfig, nodeName)
 
 		if err != nil {
 			return &apigrpc.DeleteNodesReply{
