@@ -1,6 +1,9 @@
 #/bin/bash
 KUBERNETES_VERSION=v1.12.3
+TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-kubernetes-amd64.img
 CURDIR=$(dirname $0)
+SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
+KUBERNETES_PASSWORD=$(uuidgen)
 
 pushd $CURDIR
 
@@ -9,14 +12,53 @@ export PATH=$PWD:$PATH
 rm -rf $PWD/../cluster/*
 rm -rf $PWD/../kubernetes/*
 
+if [ ! -f $TARGET_IMAGE ]; then
+    echo "Create multipass preconfigured image"
+    mkdir -p $HOME/.local/multipass/cache/
+    create-image.sh $TARGET_IMAGE $KUBERNETES_VERSION
+fi
+
 echo "Delete masterkube previous instance"
 multipass delete masterkube -p &> /dev/null
 
-kubeconfig-delete.sh masterkube
+kubeconfig-delete.sh masterkube &> /dev/null
 
 echo "Launch masterkube instance"
 
-multipass launch -n masterkube -m 4096 -c 2
+cat > /tmp/cloud-init-masterkube.json <<EOF
+{
+    "package_update": true,
+    "package_upgrade": true,
+    "runcmd": [
+        "apt autoremove"
+    ],
+    "ssh_authorized_keys": [
+        "$SSH_KEY"
+    ],
+    "users": [
+        {
+            "name": "kubernetes",
+            "primary_group": "kubernetes",
+            "groups": [
+                "adm",
+                "users"
+            ],
+            "lock_passwd": false,
+            "passwd": "$KUBERNETES_PASSWORD",
+            "sudo": "ALL=(ALL) NOPASSWD:ALL",
+            "shell": "/bin/bash",
+            "ssh_authorized_keys": [
+                "$SSH_KEY"
+            ]
+        }
+    ],
+    "group": [
+        "kubernetes"
+    ]
+}
+EOF
+
+multipass launch -n masterkube -m 4096 -c 2 --cloud-init=/tmp/cloud-init-masterkube.json file://$TARGET_IMAGE
 
 multipass mount $PWD masterkube:/masterkube/bin
 multipass mount $PWD/../cluster masterkube:/etc/cluster
@@ -25,23 +67,10 @@ multipass mount $PWD/../kubernetes masterkube:/etc/kubernetes
 echo "Prepare masterkube instance"
 
 multipass shell masterkube <<EOF
-echo "Install update"
-sudo bash -c "export DEBIAN_FRONTEND=noninteractive ; apt-get update ; apt-get upgrade -y"
-echo "Install jq"
-sudo apt-get install jq -y
-echo "Install kubernetes"
-sudo bash -c "export PATH=/masterkube/bin:$PATH; install-kubernetes.sh $KUBERNETES_VERSION"
+echo "Pull kubernetes images"
+sudo kubeadm config images pull
 sudo usermod -aG docker multipass
-exit
-EOF
-
-echo "Restart masterkube instance"
-
-multipass restart masterkube
-
 echo "Start kubernetes masterkube instance master node"
-
-multipass shell masterkube <<EOF
 sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; create-cluster.sh flannel ens3 $KUBERNETES_VERSION"
 exit
 EOF
@@ -49,7 +78,6 @@ EOF
 MASTER_IP=$(cat $PWD/../cluster/manager-ip)
 TOKEN=$(cat $PWD/../cluster/token)
 CACERT=$(cat $PWD/../cluster/ca.cert)
-SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 
 kubeconfig-merge.sh masterkube $PWD/../cluster/config
 
@@ -63,7 +91,7 @@ cat > $PWD/../config/config.json <<EOF
     "maxNode": 5,
     "nodePrice": 0.0,
     "podPrice": 0.0,
-    "image": "bionic",
+    "image": "file://$TARGET_IMAGE",
     "auto-provision": true,
     "kubeconfig": "/etc/kubernetes/config",
     "optionals": {
@@ -108,20 +136,6 @@ cat > $PWD/../config/config.json <<EOF
         "package_update": true,
         "package_upgrade": true,
         "runcmd": [
-            "export CNI_VERSION=v0.7.1",
-            "export RELEASE=v1.12.3",
-            "curl https://get.docker.com | bash",
-            "mkdir -p /opt/cni/bin",
-            "curl -L https://github.com/containernetworking/plugins/releases/download/\${CNI_VERSION}/cni-plugins-amd64-\${CNI_VERSION}.tgz | tar -C /opt/cni/bin -xz",
-            "mkdir -p /usr/local/bin",
-            "cd /usr/local/bin ; curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/\${RELEASE}/bin/linux/amd64/{kubeadm,kubelet,kubectl}",
-            "chmod +x /usr/local/bin/kube*",
-            "echo \"KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'\" > /etc/default/kubelet",
-            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/\${RELEASE}/build/debs/kubelet.service\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service",
-            "mkdir -p /etc/systemd/system/kubelet.service.d",
-            "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/\${RELEASE}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
-            "systemctl enable kubelet && systemctl restart kubelet",
-            "echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
             "kubeadm config images pull",
             "apt autoremove"
         ],
