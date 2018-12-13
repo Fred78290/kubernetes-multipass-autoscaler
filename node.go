@@ -75,7 +75,7 @@ func pipe(args ...string) (string, error) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	glog.V(2).Infof("Shell:%v", args)
+	glog.V(5).Infof("Shell:%v", args)
 
 	cmd := exec.Command(args[0], args[1:]...)
 
@@ -95,7 +95,7 @@ func shell(args ...string) error {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	glog.V(2).Infof("Shell:%v", args)
+	glog.V(5).Infof("Shell:%v", args)
 
 	cmd := exec.Command(args[0], args[1:]...)
 
