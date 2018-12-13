@@ -656,7 +656,7 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		}, nil
 	}
 
-	if nodeGroup.targetSize() < nodeGroup.minSize {
+	if nodeGroup.targetSize()-len(request.GetNode()) < nodeGroup.minSize {
 		return &apigrpc.DeleteNodesReply{
 			Error: &apigrpc.Error{
 				Code:   cloudProviderError,
