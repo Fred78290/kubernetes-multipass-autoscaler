@@ -1,0 +1,15 @@
+{
+    "address": "$IPADDR",
+    "port": 5200,
+    "identifier": "multipass",
+    "timeout": 300,
+    "config": {
+        "kubeAdmAddress": "$MASTER_IP",
+        "kubeAdmToken": "$TOKEN",
+        "kubeAdmCACert": "sha256:$CACERT",
+        "kubeAdmExtraArguments": [
+            "--ignore-preflight-errors=All",
+            "--kubernetes-version=$KUBERNETES_VERSION"
+        ]
+    }
+}
