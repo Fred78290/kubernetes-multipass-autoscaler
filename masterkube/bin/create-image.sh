@@ -6,8 +6,29 @@
 # This process disable netplan and use old /etc/network/interfaces because I don't now why each VM instance running the customized image
 # have the same IP with different mac address.
 
-[ -z $1 ] && TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-kubernetes-amd64.img || TARGET_IMAGE=$1
-[ -z $2 ] && KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt) || KUBERNETES_VERSION=$2
+# /usr/lib/python3/dist-packages/cloudinit/net/netplan.py
+
+TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-kubernetes-amd64.img
+KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
+KUBERNETES_PASSWORD=$(uuidgen)
+CNI_VERSION=v0.7.1
+
+TEMP=`getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
+eval set -- "$TEMP"
+
+# extract options and their arguments into variables.
+while true ; do
+	#echo "1:$1"
+    case "$1" in
+        -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
+        -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
+        -n|--cni-version) CNI_VERSION=$2 ; shift 2;;
+        -p|--password) KUBERNETES_PASSWORD=$2 ; shift 2;;
+        -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
+        --) shift ; break ;;
+        *) echo "$1 - Internal error!" ; exit 1 ;;
+    esac
+done
 
 # Hack because virt-customize doesn't recopy the good /etc/resolv.conf due dnsmasq
 if [ -f /run/systemd/resolve/resolv.conf ]; then
@@ -19,7 +40,7 @@ fi
 # Grab nameserver/domainname
 NAMESERVER=$(grep nameserver $RESOLVCONF | awk '{print $2}')
 DOMAINNAME=$(grep search $RESOLVCONF | awk '{print $2}')
-CNI_VERSION=v0.7.1
+INIT_SCRIPT=prepare-k8s-bionic.sh
 
 cat > /tmp/prepare-k8s-bionic.sh <<EOF
 #/bin/bash
@@ -31,8 +52,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
 apt-get upgrade -y
+apt-get install jq socat -y
 
-apt-get install jq -y
+apt-get autoremove -y
 
 curl https://get.docker.com | bash
 
@@ -57,19 +79,23 @@ export PATH=/opt/cni/bin:/usr/local/bin:\$PATH
 
 kubeadm config images pull
 
-apt-get autoremove -y
-
-apt-get install ifupdown
-
 echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
-echo "auto lo" >> /etc/network/interfaces
-echo "iface lo inet loopback" >> /etc/network/interfaces
-echo >> /etc/network/interfaces
-echo "auto ens3" >> /etc/network/interfaces
-echo "iface ens3 inet dhcp" >> /etc/network/interfaces
+cat > /etc/systemd/network/20-dhcp.network <<SHELL
+[Match]
+Name=en*
 
-#dpkg-reconfigure cloud-init
+[Network]
+DHCP=yes
+
+[DHCP]
+UseMTU=true
+UseDomains=true
+ClientIdentifier=mac
+SHELL
+
+echo "cloud-init	cloud-init/datasources	multiselect	NoCloud,None" | debconf-set-selections
+dpkg-reconfigure cloud-init
 EOF
 
 chmod +x /tmp/prepare-k8s-bionic.sh
@@ -84,11 +110,10 @@ cp ~/.local/multipass/cache/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
 
 qemu-img resize $TARGET_IMAGE 5G
 sudo virt-customize --network -a $TARGET_IMAGE --timezone Europe/Paris
-sudo virt-customize --network -a $TARGET_IMAGE --root-password password:$(uuidgen)
-sudo virt-customize --network -a $TARGET_IMAGE --copy-in  /tmp/prepare-k8s-bionic.sh:/usr/local/bin
-sudo virt-customize --network -a $TARGET_IMAGE  --run-command /usr/local/bin/prepare-k8s-bionic.sh
-sudo virt-customize --network -a $TARGET_IMAGE  --run-command "/bin/rm /etc/machine-id"
-sudo virt-customize --network -a $TARGET_IMAGE  --firstboot-command "/bin/rm /etc/machine-id; /bin/systemd-machine-id-setup"
+sudo virt-customize --network -a $TARGET_IMAGE --root-password password:$KUBERNETES_PASSWORD
+sudo virt-customize --network -a $TARGET_IMAGE --copy-in /tmp/$INIT_SCRIPT:/usr/local/bin
+sudo virt-customize --network -a $TARGET_IMAGE --run-command /usr/local/bin/$INIT_SCRIPT
+sudo virt-customize --network -a $TARGET_IMAGE --firstboot-command "/bin/rm /etc/machine-id; /bin/systemd-machine-id-setup"
 sudo virt-sysprep -a $TARGET_IMAGE
 
 rm /tmp/prepare-k8s-bionic.sh
