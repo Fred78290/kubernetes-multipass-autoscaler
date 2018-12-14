@@ -53,4 +53,5 @@ const (
 	errNodeGroupCleanupFailOnVM       = "On node group: %s, failed to delete VM: %s, reason: %v"
 	errKubeCtlIgnoredError            = "kubectl got error on VM: %s, reason: %s"
 	errNotImplemented                 = "Not implemented"
+	errNodeIsNotReady                 = "Node %s is not ready"
 )
