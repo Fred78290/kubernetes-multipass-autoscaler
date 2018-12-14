@@ -19,7 +19,7 @@ LABEL maintainer="Frédéric Boltz <frederic.boltz@gmail.com>"
 ENV DEBIAN_FRONTEND noninteractive
 RUN clean-install ca-certificates tzdata
 
-ADD kubernetes-multipass-autoscaler kubernetes-multipass-autoscaler
+ADD out/multipass-autoscaler-linux-amd64 kubernetes-multipass-autoscaler
 ADD run.sh run.sh
 
 CMD ./run.sh
