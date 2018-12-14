@@ -1,7 +1,11 @@
 #/bin/bash
 pushd $(dirname $0)
 
-make build
 make container
 
-./kubernetes-multipass-autoscaler --config masterkube/config/config.json -v=9 -logtostderr=true
+[ $(uname -s) = "Darwin" ] && GOOS=darwin || GOOS=linux
+
+./out/multipass-autoscaler-$GOOS-amd64 \
+    --config=./masterkube/config/kubernetes-multipass-autoscaler.json \
+    -v=9 \
+    -logtostderr=true
