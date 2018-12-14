@@ -15,8 +15,7 @@ vendor
 
 *.code-workspace
 
-examples/config\.json
-
-kubernetes-multipass-autoscaler
+out
 masterkube/cluster/*
 masterkube/kubernetes/*
+masterkube/config/*\.json
