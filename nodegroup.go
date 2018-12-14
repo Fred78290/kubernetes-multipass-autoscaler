@@ -28,6 +28,8 @@ type multipassNodeGroup struct {
 	nodes          map[string]*multipassNode
 	pendingNodes   map[string]*multipassNode
 	pendingNodesWG sync.WaitGroup
+	nodeLabels     map[string]string
+	systemLabels   map[string]string
 }
 
 type nodeCreationExtra struct {
@@ -37,8 +39,10 @@ type nodeCreationExtra struct {
 	kubeExtraArgs []string
 	kubeConfig    string
 	image         string
-	cloudInit     *map[string]interface{}
-	mountPoints   *map[string]string
+	cloudInit     map[string]interface{}
+	mountPoints   map[string]string
+	nodeLabels    map[string]string
+	systemLabels  map[string]string
 	autoprovision bool
 }
 

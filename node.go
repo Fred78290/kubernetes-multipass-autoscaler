@@ -6,9 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v2"
+	apiv1 "k8s.io/api/core/v1"
 
 	"github.com/golang/glog"
 )
@@ -109,6 +112,56 @@ func shell(args ...string) error {
 	return nil
 }
 
+func (vm *multipassNode) waitReady(kubeconfig string) error {
+	glog.V(5).Infof("multipassNode::waitReady, node:%s", vm.nodeName)
+
+	// Max 60s
+	for index := 0; index < 12; index++ {
+		var out string
+		var err error
+		var arg = []string{
+			"kubectl",
+			"get",
+			"nodes",
+			vm.nodeName,
+			"--output",
+			"json",
+			"--kubeconfig",
+			kubeconfig,
+		}
+
+		if out, err = pipe(arg...); err != nil {
+			return err
+		}
+
+		var nodeInfo apiv1.Node
+
+		if err := json.Unmarshal([]byte(out), &nodeInfo); err != nil {
+			return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+		}
+
+		glog.V(5).Infof("multipassNode::waitReady, %v", nodeInfo)
+
+		for _, status := range nodeInfo.Status.Conditions {
+			if status.Type == "Ready" {
+				glog.V(5).Infof("multipassNode::waitReady, (%i) found Ready for %s", index, vm.nodeName)
+				if b, e := strconv.ParseBool(string(status.Status)); e == nil {
+					if b {
+						glog.V(5).Infof("multipassNode::waitReady, (%i) VM %s is Ready", index, vm.nodeName)
+						return nil
+					}
+				}
+			}
+		}
+
+		glog.V(5).Infof("multipassNode::waitReady, (%d) node:%s not ready", index, vm.nodeName)
+
+		time.Sleep(5 * time.Second)
+	}
+
+	return fmt.Errorf(errNodeIsNotReady, vm.nodeName)
+}
+
 func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	glog.V(5).Infof("multipassNode::launchVM, node:%s", vm.nodeName)
 
@@ -120,7 +173,7 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 		return fmt.Errorf(errVMAlreadyCreated, vm.nodeName)
 	}
 
-	if extras.cloudInit != nil && len(*extras.cloudInit) > 0 {
+	if extras.cloudInit != nil && len(extras.cloudInit) > 0 {
 		var b []byte
 
 		fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.nodeName)
@@ -130,9 +183,9 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 			return err
 		}
 
-		//defer os.Remove(cloudInitFile.Name())
+		defer os.Remove(cloudInitFile.Name())
 
-		b, err = yaml.Marshal(*extras.cloudInit)
+		b, err = yaml.Marshal(extras.cloudInit)
 
 		if err != nil {
 			glog.Errorf(errCloudInitMarshallError, err)
@@ -184,8 +237,8 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	}
 
 	// Add mount point
-	if extras.mountPoints != nil && len(*extras.mountPoints) > 0 {
-		for hostPath, guestPath := range *extras.mountPoints {
+	if extras.mountPoints != nil && len(extras.mountPoints) > 0 {
+		for hostPath, guestPath := range extras.mountPoints {
 			if err = shell("multipass", "mount", hostPath, fmt.Sprintf("%s:%s", vm.nodeName, guestPath)); err != nil {
 				glog.Warningf(errUnableToMountPath, hostPath, guestPath, vm.nodeName, err)
 			}
@@ -225,32 +278,40 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 			args = append(args, extras.kubeExtraArgs...)
 		}
 
-		/*
-			var builder strings.Builder
-
-			builder.WriteString(fmt.Sprintf("/usr/local/bin/kubeadm join %s --token %s --discovery-token-ca-cert-hash %s", extras.kubeHost, extras.kubeToken, extras.kubeCACert))
-
-			args = []string{
-				"multipass",
-				"exec",
-				vm.nodeName,
-				"--",
-				"sudo",
-				"bash",
-				"-c",
-				builder.String(),
-			}
-
-			// Append extras arguments
-			for _, extra := range extras.kubeExtraArgs {
-				builder.WriteString(" ")
-				builder.WriteString(extra)
-			}
-		*/
-
 		if err := shell(args...); err != nil {
 			glog.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
 			return fmt.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
+		}
+
+		if err := vm.waitReady(extras.kubeConfig); err != nil {
+			return err
+		}
+
+		if len(extras.nodeLabels)+len(extras.systemLabels) > 0 {
+
+			args = []string{
+				"kubectl",
+				"label",
+				"nodes",
+				vm.nodeName,
+			}
+
+			// Append extras arguments
+			for k, v := range extras.nodeLabels {
+				args = append(args, fmt.Sprintf("%s=%s", k, v))
+			}
+
+			for k, v := range extras.systemLabels {
+				args = append(args, fmt.Sprintf("%s=%s", k, v))
+			}
+
+			args = append(args, "--kubeconfig")
+			args = append(args, extras.kubeConfig)
+
+			if err := shell(args...); err != nil {
+				glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+				return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+			}
 		}
 	}
 
@@ -270,6 +331,11 @@ func (vm *multipassNode) startVM(kubeconfig string) error {
 	}
 
 	if state == nodeStateStopped {
+		if err = shell("multipass", "start", vm.nodeName); err != nil {
+			glog.Errorf(errStartVMFailed, vm.nodeName, err)
+			return fmt.Errorf(errStartVMFailed, vm.nodeName, err)
+		}
+
 		args := []string{
 			"kubectl",
 			"uncordon",
@@ -280,11 +346,6 @@ func (vm *multipassNode) startVM(kubeconfig string) error {
 
 		if err = shell(args...); err != nil {
 			glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
-		}
-
-		if err = shell("multipass", "start", vm.nodeName); err != nil {
-			glog.Errorf(errStartVMFailed, vm.nodeName, err)
-			return fmt.Errorf(errStartVMFailed, vm.nodeName, err)
 		}
 
 		vm.state = nodeStateRunning

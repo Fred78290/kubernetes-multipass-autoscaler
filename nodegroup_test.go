@@ -80,16 +80,23 @@ func Test_multipassNode_launchVM(t *testing.T) {
 					state:    nodeStateNotCreated,
 				}
 
+				nodeLabels := map[string]string{
+					"monitor":  "true",
+					"database": "true",
+				}
+
 				extras := &nodeCreationExtra{
-					config.KubeAdm.Address,
-					config.KubeAdm.Token,
-					config.KubeAdm.CACert,
-					config.KubeAdm.ExtraArguments,
-					config.KubeCtlConfig,
-					config.Image,
-					&config.CloudInit,
-					&config.MountPoints,
-					config.AutoProvision,
+					kubeHost:      config.KubeAdm.Address,
+					kubeToken:     config.KubeAdm.Token,
+					kubeCACert:    config.KubeAdm.CACert,
+					kubeExtraArgs: config.KubeAdm.ExtraArguments,
+					kubeConfig:    config.KubeCtlConfig,
+					image:         config.Image,
+					cloudInit:     config.CloudInit,
+					mountPoints:   config.MountPoints,
+					nodeLabels:    nodeLabels,
+					systemLabels:  make(map[string]string),
+					autoprovision: config.AutoProvision,
 				}
 
 				if err := vm.launchVM(extras); (err != nil) != tt.wantErr {
@@ -182,15 +189,17 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 
 	if assert.NoError(t, err) {
 		extras := &nodeCreationExtra{
-			config.KubeAdm.Address,
-			config.KubeAdm.Token,
-			config.KubeAdm.CACert,
-			config.KubeAdm.ExtraArguments,
-			config.KubeCtlConfig,
-			config.Image,
-			&config.CloudInit,
-			&config.MountPoints,
-			config.AutoProvision,
+			kubeHost:      config.KubeAdm.Address,
+			kubeToken:     config.KubeAdm.Token,
+			kubeCACert:    config.KubeAdm.CACert,
+			kubeExtraArgs: config.KubeAdm.ExtraArguments,
+			kubeConfig:    config.KubeCtlConfig,
+			image:         config.Image,
+			cloudInit:     config.CloudInit,
+			mountPoints:   config.MountPoints,
+			nodeLabels:    testNodeGroup.nodeLabels,
+			systemLabels:  testNodeGroup.systemLabels,
+			autoprovision: config.AutoProvision,
 		}
 
 		tests := []struct {

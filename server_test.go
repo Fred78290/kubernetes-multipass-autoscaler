@@ -34,6 +34,10 @@ var testNodeGroup = multipassNodeGroup{
 	maxSize:      5,
 	pendingNodes: make(map[string]*multipassNode),
 	nodes:        make(map[string]*multipassNode),
+	nodeLabels: map[string]string{
+		"monitor":  "true",
+		"database": "true",
+	},
 }
 
 func newTestServer(nodeGroup *multipassNodeGroup) (*MultipassServer, context.Context, error) {

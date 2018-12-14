@@ -71,7 +71,7 @@ func (s *MultipassServer) generateNodeGroupName() string {
 	return fmt.Sprintf("ng-%d", time.Now().Unix())
 }
 
-func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string) (*multipassNodeGroup, error) {
+func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string, labels, systemLabels map[string]string) (*multipassNodeGroup, error) {
 
 	machine := s.config.Machines[machineType]
 
@@ -92,6 +92,8 @@ func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string) (
 		nodes:        make(map[string]*multipassNode),
 		minSize:      s.config.MinNode,
 		maxSize:      s.config.MaxNode,
+		nodeLabels:   labels,
+		systemLabels: systemLabels,
 	}
 
 	s.nodeGroups[nodeGroupID] = nodeGroup
@@ -130,15 +132,17 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 		if nodeGroup.minSize > 0 {
 
 			extras := &nodeCreationExtra{
-				s.kubeAdmConfig.KubeAdmAddress,
-				s.kubeAdmConfig.KubeAdmToken,
-				s.kubeAdmConfig.KubeAdmCACert,
-				s.kubeAdmConfig.KubeAdmExtraArguments,
-				s.config.KubeCtlConfig,
-				s.config.Image,
-				&s.config.CloudInit,
-				&s.config.MountPoints,
-				s.config.AutoProvision,
+				kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
+				kubeToken:     s.kubeAdmConfig.KubeAdmToken,
+				kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
+				kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
+				kubeConfig:    s.config.KubeCtlConfig,
+				image:         s.config.Image,
+				cloudInit:     s.config.CloudInit,
+				mountPoints:   s.config.MountPoints,
+				nodeLabels:    nodeGroup.nodeLabels,
+				systemLabels:  nodeGroup.systemLabels,
+				autoprovision: s.config.AutoProvision,
 			}
 
 			if err := nodeGroup.addNodes(nodeGroup.minSize, extras); err != nil {
@@ -377,14 +381,30 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 
 	var nodeGroupIdentifier string
 
-	request.GetLabels()
-	if request.GetLabels() != nil && len(request.GetLabels()["clusterscaler.nodegroup/name"]) == 0 {
-		nodeGroupIdentifier = s.generateNodeGroupName()
-	} else {
-		nodeGroupIdentifier = request.GetLabels()["clusterscaler.nodegroup/name"]
+	labels := make(map[string]string)
+	systemLabels := make(map[string]string)
+
+	if request.GetLabels() != nil {
+		for k2, v2 := range request.GetLabels() {
+			labels[k2] = v2
+		}
 	}
 
-	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMachineType())
+	if request.GetSystemLabels() != nil {
+		for k2, v2 := range request.GetSystemLabels() {
+			systemLabels[k2] = v2
+		}
+	}
+
+	if labels != nil && len(labels["clusterscaler.nodegroup/name"]) == 0 {
+		nodeGroupIdentifier = s.generateNodeGroupName()
+	} else {
+		nodeGroupIdentifier = labels["clusterscaler.nodegroup/name"]
+	}
+
+	labels["clusterscaler.nodegroup/name"] = nodeGroupIdentifier
+
+	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMachineType(), labels, systemLabels)
 
 	if err != nil {
 		glog.Errorf(errUnableToCreateNodeGroup, nodeGroupIdentifier, err)
@@ -605,15 +625,17 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 	}
 
 	extras := &nodeCreationExtra{
-		s.kubeAdmConfig.KubeAdmAddress,
-		s.kubeAdmConfig.KubeAdmToken,
-		s.kubeAdmConfig.KubeAdmCACert,
-		s.kubeAdmConfig.KubeAdmExtraArguments,
-		s.config.KubeCtlConfig,
-		s.config.Image,
-		&s.config.CloudInit,
-		&s.config.MountPoints,
-		s.config.AutoProvision,
+		kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
+		kubeToken:     s.kubeAdmConfig.KubeAdmToken,
+		kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
+		kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
+		kubeConfig:    s.config.KubeCtlConfig,
+		image:         s.config.Image,
+		cloudInit:     s.config.CloudInit,
+		mountPoints:   s.config.MountPoints,
+		nodeLabels:    nodeGroup.nodeLabels,
+		systemLabels:  nodeGroup.systemLabels,
+		autoprovision: s.config.AutoProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -778,15 +800,17 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 	}
 
 	extras := &nodeCreationExtra{
-		s.kubeAdmConfig.KubeAdmAddress,
-		s.kubeAdmConfig.KubeAdmToken,
-		s.kubeAdmConfig.KubeAdmCACert,
-		s.kubeAdmConfig.KubeAdmExtraArguments,
-		s.config.KubeCtlConfig,
-		s.config.Image,
-		&s.config.CloudInit,
-		&s.config.MountPoints,
-		s.config.AutoProvision,
+		kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
+		kubeToken:     s.kubeAdmConfig.KubeAdmToken,
+		kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
+		kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
+		kubeConfig:    s.config.KubeCtlConfig,
+		image:         s.config.Image,
+		cloudInit:     s.config.CloudInit,
+		mountPoints:   s.config.MountPoints,
+		nodeLabels:    nodeGroup.nodeLabels,
+		systemLabels:  nodeGroup.systemLabels,
+		autoprovision: s.config.AutoProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
