@@ -120,7 +120,18 @@ pushd $CURDIR/../
 
 export PATH=$CURDIR:$PATH
 
+if [ ! -f ./etc/ssl/privkey.pem ]; then
+    mkdir -p ./etc/ssl/
+    openssl genrsa 2048 > ./etc/ssl/privkey.pem 
+    openssl req -new -x509 -nodes -sha1 -days 3650 -key ./etc/ssl/privkey.pem  > ./etc/ssl/cert.pem 
+    cat ./etc/ssl/cert.pem ./etc/ssl/privkey.pem > ./etc/ssl/fullchain.pem
+    chmod 644 ./etc/ssl/*
+fi
+
+export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text < ./etc/ssl/cert.pem | grep 'Subject: CN =' | awk '{print $4}' | sed 's/\*\.//g')
+
 rm -rf cluster/*
+rm -rf config/*
 rm -rf kubernetes/*
 
 if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
@@ -179,6 +190,8 @@ fi
 
 
 multipass mount $PWD/bin masterkube:/masterkube/bin
+multipass mount $PWD/templates masterkube:/masterkube/templates
+multipass mount $PWD/etc masterkube:/masterkube/etc
 multipass mount $PWD/cluster masterkube:/etc/cluster
 multipass mount $PWD/kubernetes masterkube:/etc/kubernetes
 multipass mount $PWD/config masterkube:/etc/cluster-autoscaler
@@ -198,21 +211,22 @@ CACERT=$(cat ./cluster/ca.cert)
 NET_IF=$(ip route get 1|awk '{print $5;exit}')
 IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
 
-kubectl label nodes masterkube app=cluster-autoscaler --kubeconfig=./cluster/config
+kubectl label nodes masterkube master=true --kubeconfig=./cluster/config
+kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
 
 kubeconfig-merge.sh masterkube cluster/config
 
 echo "Write multipass cloud autoscaler provider config"
 
 echo $(eval "cat <<EOF
-$(<./autoscaler/grpc-config.json)
+$(<./templates/autoscaler/grpc-config.json)
 EOF") | jq . > ./config/grpc-config.json
 
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
 
     cat > ./config/kubernetes-multipass-autoscaler.json <<-EOF
     {
-        "listen": "127.0.0.1:5200",
+        "listen": "$IPADDR:5200",
         "secret": "multipass",
         "minNode": 0,
         "maxNode": 5,
@@ -260,7 +274,7 @@ EOF
 else
     cat > config/kubernetes-multipass-autoscaler.json <<-EOF
     {
-        "listen": "127.0.0.1:5200",
+        "listen": "$IPADDR:5200",
         "secret": "multipass",
         "minNode": 0,
         "maxNode": 5,
@@ -310,5 +324,21 @@ else
 EOF
 
 fi
+
+HOSTS_DEF=$(multipass info masterkube|grep IPv4|awk "{print \$2 \"    masterkube.$DOMAIN_NAME masterkube-dashboard.$DOMAIN_NAME\"}")
+sudo sed -i '/masterkube/d' /etc/hosts
+sudo bash -c "echo '$HOSTS_DEF' >> /etc/hosts"
+
+echo "Create docker registry secret"
+kubectl create secret docker-registry $GITLAB_REGISTRY \
+    --docker-username=$GITLAB_UID \
+    --docker-password=$GITLAB_PWD \
+    --docker-server=$GITLAB_REGISTRY \
+    --docker-email=$GITLAB_EMAIL \
+    --kubeconfig=./cluster/config \
+	-n kube-system
+
+./bin/create-ingress-controller.sh
+./bin/create-dashboard.sh
 
 popd

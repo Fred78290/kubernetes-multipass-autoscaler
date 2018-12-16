@@ -25,7 +25,10 @@
                 }
             },
             "spec": {
-                "serviceAccountName": "admin",
+                "serviceAccountName": "cluster-autoscaler",
+                "nodeSelector": {
+                    "master": "true"
+                },
                 "containers": [
                     {
                         "image": "registry.gitlab.com/frederic.boltz/k8s-autoscaler/cluster-autoscaler:dev",
@@ -45,8 +48,8 @@
                             "--v=4",
                             "--stderrthreshold=info",
                             "--cloud-provider=grpc",
-                            "--cloud-config=/etc/cluster-autoscaler/grpc.conf",
-                            "--nodes=0:5:grpc-cloudprovider-id"
+                            "--cloud-config=/etc/cluster-autoscaler/grpc-config.conf",
+                            "--nodes=0:5:ca-grpc-multipass"
                         ],
                         "imagePullPolicy": "Always",
                         "volumeMounts": [
