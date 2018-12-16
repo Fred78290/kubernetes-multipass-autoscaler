@@ -11,8 +11,9 @@ GOOS?=linux
 GOARCH?=amd64
 REGISTRY?=registry.gitlab.com/frederic.boltz/k8s-autoscaler
 BASEIMAGE?=k8s.gcr.io/debian-base-amd64:0.3.2
-
-VERSION_LDFLAGS := -X github.com/Fred78290/kubernetes-multipass-autoscaler/pkg/version.version=$(VERSION)
+#VERSION_LDFLAGS := -X github.com/Fred78290/kubernetes-multipass-autoscaler/pkg/version.version=$(VERSION)
+BUILD_DATE?=`date +%Y-%m-%dT%H:%M:%SZ`
+VERSION_LDFLAGS=-X main.phVersion=$(VERSION)
 
 ifdef BUILD_TAGS
   TAGS_FLAG=--tags ${BUILD_TAGS}
@@ -28,7 +29,7 @@ deps:
 	go get github.com/tools/godep
 
 build:
-	$(ENVVAR) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="$(VERSION_LDFLAGS)" -a -o out/multipass-autoscaler-$(GOOS)-$(GOARCH) ${TAGS_FLAG}
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="-X main.phVersion=$(VERSION) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/multipass-autoscaler-$(GOOS)-$(GOARCH) ${TAGS_FLAG}
 
 build-binary: clean
 	make -e GOOS=linux -e GOARCH=amd64 build
@@ -62,7 +63,7 @@ docker-builder:
 build-in-docker: docker-builder
 	docker run --rm -v `pwd`:/gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler/ autoscaling-builder:latest bash \
 		-c 'cd /gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler \
-		&& BUILD_TAGS=${BUILD_TAGS} make build-binary'
+		&& BUILD_TAGS=${BUILD_TAGS} make -e BUILD_DATE=`date +%Y-%m-%dT%H:%M:%SZ` build-binary'
 
 release: build-in-docker execute-release
 	@echo "Full in-docker release ${TAG}${FOR_PROVIDER} completed"
