@@ -31,71 +31,79 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
+var phVersion = "v0.0.0-unset"
+var phBuildDate = ""
+
 func main() {
 	var config MultipassServerConfig
 
+	versionPtr := flag.Bool("version", false, "Give the version")
 	configPtr := flag.String("config", "/etc/default/multipass-cluster-autoscaler.json", "The config for the server")
 	flag.Parse()
 
-	file, err := os.Open(*configPtr)
-	if err != nil {
-		glog.Fatalf("failed to open config file:%s, error:%v", *configPtr, err)
-	}
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		glog.Fatalf("failed to decode config file:%s, error:%v", *configPtr, err)
-	}
-
-	glog.V(2).Infof("Start listening server")
-
-	lis, err := net.Listen("tcp", config.Listen)
-
-	if err != nil {
-		glog.Fatalf("failed to listen: %v", err)
-	}
-
-	server := grpc.NewServer()
-
-	if config.Optionals == nil {
-		config.Optionals = &MultipassServerOptionals{
-			Pricing:                  false,
-			GetAvailableMachineTypes: false,
-			NewNodeGroup:             false,
-			TemplateNodeInfo:         false,
-			Create:                   false,
-			Delete:                   false,
+	if *versionPtr {
+		log.Printf("The current version is:%s, build at:%s", phVersion, phBuildDate)
+	} else {
+		file, err := os.Open(*configPtr)
+		if err != nil {
+			glog.Fatalf("failed to open config file:%s, error:%v", *configPtr, err)
 		}
+
+		decoder := json.NewDecoder(file)
+		err = decoder.Decode(&config)
+		if err != nil {
+			glog.Fatalf("failed to decode config file:%s, error:%v", *configPtr, err)
+		}
+
+		glog.V(2).Infof("Start listening server")
+
+		lis, err := net.Listen("tcp", config.Listen)
+
+		if err != nil {
+			glog.Fatalf("failed to listen: %v", err)
+		}
+
+		server := grpc.NewServer()
+
+		if config.Optionals == nil {
+			config.Optionals = &MultipassServerOptionals{
+				Pricing:                  false,
+				GetAvailableMachineTypes: false,
+				NewNodeGroup:             false,
+				TemplateNodeInfo:         false,
+				Create:                   false,
+				Delete:                   false,
+			}
+		}
+
+		kubeAdmConfig := &apigrc.KubeAdmConfig{
+			KubeAdmAddress:        config.KubeAdm.Address,
+			KubeAdmToken:          config.KubeAdm.Token,
+			KubeAdmCACert:         config.KubeAdm.CACert,
+			KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
+		}
+
+		multipassserver := &MultipassServer{
+			resourceLimiter: &resourceLimiter{
+				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
+				map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
+			},
+			config:        config,
+			nodeGroups:    make(map[string]*multipassNodeGroup),
+			kubeAdmConfig: kubeAdmConfig,
+		}
+
+		apigrc.RegisterCloudProviderServiceServer(server, multipassserver)
+		apigrc.RegisterNodeGroupServiceServer(server, multipassserver)
+		apigrc.RegisterPricingModelServiceServer(server, multipassserver)
+
+		reflection.Register(server)
+
+		if err := server.Serve(lis); err != nil {
+			log.Fatalf("failed to serve: %v", err)
+		}
+
+		glog.V(2).Infof("End listening server")
+		glog.Flush()
 	}
-
-	kubeAdmConfig := &apigrc.KubeAdmConfig{
-		KubeAdmAddress:        config.KubeAdm.Address,
-		KubeAdmToken:          config.KubeAdm.Token,
-		KubeAdmCACert:         config.KubeAdm.CACert,
-		KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
-	}
-
-	multipassserver := &MultipassServer{
-		resourceLimiter: &resourceLimiter{
-			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
-			map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
-		},
-		config:        config,
-		nodeGroups:    make(map[string]*multipassNodeGroup),
-		kubeAdmConfig: kubeAdmConfig,
-	}
-
-	apigrc.RegisterCloudProviderServiceServer(server, multipassserver)
-	apigrc.RegisterNodeGroupServiceServer(server, multipassserver)
-	apigrc.RegisterPricingModelServiceServer(server, multipassserver)
-
-	reflection.Register(server)
-
-	if err := server.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	}
-
-	glog.V(2).Infof("End listening server")
-	glog.Flush()
 }
