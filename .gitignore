@@ -18,4 +18,5 @@ vendor
 out
 masterkube/cluster/*
 masterkube/kubernetes/*
-masterkube/config/*\.json
+masterkube/config/*
+masterkube/etc/ssl/*
