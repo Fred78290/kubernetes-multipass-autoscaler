@@ -71,7 +71,7 @@ func (s *MultipassServer) generateNodeGroupName() string {
 	return fmt.Sprintf("ng-%d", time.Now().Unix())
 }
 
-func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string, labels, systemLabels map[string]string) (*multipassNodeGroup, error) {
+func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string) (*multipassNodeGroup, error) {
 
 	machine := s.config.Machines[machineType]
 
@@ -90,8 +90,8 @@ func (s *MultipassServer) newNodeGroup(nodeGroupID string, machineType string, l
 		status:       nodegroupNotCreated,
 		pendingNodes: make(map[string]*multipassNode),
 		nodes:        make(map[string]*multipassNode),
-		minSize:      s.config.MinNode,
-		maxSize:      s.config.MaxNode,
+		minSize:      int(minNodeSize),
+		maxSize:      int(maxNodeSize),
 		nodeLabels:   labels,
 		systemLabels: systemLabels,
 	}
@@ -396,15 +396,15 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 		}
 	}
 
-	if labels != nil && len(labels["clusterscaler.nodegroup/name"]) == 0 {
+	if len(request.GetNodeGroupID()) == 0 {
 		nodeGroupIdentifier = s.generateNodeGroupName()
 	} else {
-		nodeGroupIdentifier = labels["clusterscaler.nodegroup/name"]
+		nodeGroupIdentifier = request.GetNodeGroupID()
 	}
 
-	labels["clusterscaler.nodegroup/name"] = nodeGroupIdentifier
+	labels["cluster.autoscaler.nodegroup/name"] = nodeGroupIdentifier
 
-	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMachineType(), labels, systemLabels)
+	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMinNodeSize(), request.GetMaxNodeSize(), request.GetMachineType(), labels, systemLabels)
 
 	if err != nil {
 		glog.Errorf(errUnableToCreateNodeGroup, nodeGroupIdentifier, err)
