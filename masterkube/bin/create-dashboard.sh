@@ -10,7 +10,7 @@ export ETC_DIR=./config/deployment/dashboard
 export KUBERNETES_TEMPLATE=./templates/dashboard
 
 if [ -z "$DOMAIN_NAME" ]; then
-    export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text < masterkube/etc/ssl/cert.pem | grep 'Subject: CN =' | awk '{print $4}' | sed 's/\*\.//g')
+    export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text < ./etc/ssl/cert.pem | grep 'Subject: CN =' | awk '{print $4}' | sed 's/\*\.//g')
 fi
 
 mkdir -p $ETC_DIR
@@ -33,7 +33,7 @@ kubectl create secret generic kubernetes-dashboard-certs \
 deploy serviceaccount
 deploy role
 deploy rolebinding
-deploy deployement
+deploy deployment
 deploy service
 deploy ingress
 
