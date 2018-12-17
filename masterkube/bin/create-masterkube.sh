@@ -340,5 +340,6 @@ kubectl create secret docker-registry $GITLAB_REGISTRY \
 
 ./bin/create-ingress-controller.sh
 ./bin/create-dashboard.sh
+./bin/create-helloworld.sh
 
 popd
