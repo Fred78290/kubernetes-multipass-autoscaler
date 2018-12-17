@@ -1,7 +1,7 @@
 {
     "address": "$IPADDR",
     "port": 5200,
-    "identifier": "multipass",
+    "secret": "multipass",
     "timeout": 300,
     "config": {
         "kubeAdmAddress": "$MASTER_IP",
