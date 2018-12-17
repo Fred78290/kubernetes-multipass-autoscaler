@@ -29,6 +29,11 @@
                 "nodeSelector": {
                     "master": "true"
                 },
+                "imagePullSecrets": [
+                    {
+                        "name": "$GITLAB_REGISTRY"
+                    }
+                ],
                 "containers": [
                     {
                         "image": "registry.gitlab.com/frederic.boltz/k8s-autoscaler/cluster-autoscaler:dev",
