@@ -5,11 +5,13 @@ NET_IF==$(ip route get 1|awk '{print $5;exit}')
 KUBERNETES_VERION=
 DRY_RUN=false
 CLUSTER_DIR=/etc/cluster
+PROVIDERID=
 
 [ -z "$1" ] || CNI=$1
 [ -z "$2" ] || NET_IF=$2
 [ -z "$3" ] || KUBERNETES_VERION=$3
- 
+[ -z "$4" ] || PROVIDERID=$4
+
 # Check if interface exists, else take inet default gateway
 ifconfig $NET_IF &> /dev/null || NET_IF=$(ip route get 1|awk '{print $5;exit}')
 IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
@@ -25,9 +27,13 @@ else
 fi
 
 if [ ! -f /etc/kubernetes/kubelet.conf ]; then
-    echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
-    
-    if [ "x$CNI" = "" ]; then
+
+    if [ -z "$(grep 'provider-id' /etc/default/kubelet)" ]; then
+        echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true --provider-id=${PROVIDERID}'" > /etc/default/kubelet
+        systemctl restart kubelet
+    fi
+
+    if [ -z "$CNI" ]; then
         CNI="calico"
     fi
 

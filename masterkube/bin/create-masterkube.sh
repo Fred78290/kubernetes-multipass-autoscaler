@@ -1,14 +1,17 @@
 #/bin/bash
 CURDIR=$(dirname $0)
 
+sudo apt-get install python-yaml -y
+
 CUSTOM_IMAGE=YES
 SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 #KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
-KUBERNETES_VERSION=v1.12.3
+KUBERNETES_VERSION=v1.12.4
 KUBERNETES_PASSWORD=$(uuidgen)
 KUBECONFIG=$HOME/.kube/config
 TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
 CNI_VERSION="v0.7.1"
+PROVIDERID="multipass://ca-grpc-multipass/object?type=node&name=masterkube"
 
 TEMP=`getopt -o ci:k:n:p:v: --long no-custom-image,custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
@@ -61,9 +64,10 @@ RUN_CMD=$(cat <<EOF
     "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service",
     "mkdir -p /etc/systemd/system/kubelet.service.d",
     "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
-    "systemctl enable kubelet && systemctl restart kubelet",
+    "systemctl enable kubelet",
+    "systemctl restart kubelet",
     "echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
-    "kubeadm config images pull",
+    "kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}",
     "apt autoremove"
 ]
 EOF
@@ -146,7 +150,7 @@ fi
 echo "Delete masterkube previous instance"
 multipass delete masterkube -p &> /dev/null
 
-kubeconfig-delete.sh masterkube &> /dev/null
+./bin/kubeconfig-delete.sh masterkube &> /dev/null
 
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
     echo "Launch custom masterkube instance"
@@ -165,7 +169,7 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
     }
 EOF
 
-    multipass launch -n masterkube -m 4096 -c 2 --cloud-init=./config/cloud-init-masterkube.json file://$TARGET_IMAGE
+    LAUNCH_IMAGE_URL=file://$TARGET_IMAGE
 
 else
     echo "Launch standard masterkube instance"
@@ -185,9 +189,15 @@ else
     }
 EOF
 
-    multipass launch -n masterkube -m 4096 -c 2 --cloud-init=./config/cloud-init-masterkube.json file://$TARGET_IMAGE
+    LAUNCH_IMAGE_URL="bionic"
 fi
 
+# Avoid splitted command lines ==> width=500
+cat ./config/cloud-init-masterkube.json \
+    | python -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" \
+    > ./config/cloud-init-masterkube.yaml
+
+multipass launch -n masterkube -m 4096 -c 2 --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
 
 multipass mount $PWD/bin masterkube:/masterkube/bin
 multipass mount $PWD/templates masterkube:/masterkube/templates
@@ -201,7 +211,7 @@ echo "Prepare masterkube instance"
 multipass shell masterkube <<EOF
 sudo usermod -aG docker multipass
 echo "Start kubernetes masterkube instance master node"
-sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; kubeadm config images pull; create-cluster.sh flannel ens3 $KUBERNETES_VERSION"
+sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; kubeadm config images pull; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
 exit
 EOF
 
@@ -214,17 +224,17 @@ IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
 kubectl label nodes masterkube master=true --kubeconfig=./cluster/config
 kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
 
-kubeconfig-merge.sh masterkube cluster/config
+./bin/kubeconfig-merge.sh masterkube cluster/config
 
 echo "Write multipass cloud autoscaler provider config"
 
 echo $(eval "cat <<EOF
-$(<./templates/autoscaler/grpc-config.json)
+$(<./templates/cluster/grpc-config.json)
 EOF") | jq . > ./config/grpc-config.json
 
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
 
-    cat > ./config/kubernetes-multipass-autoscaler.json <<-EOF
+    cat > /tmp/json <<-EOF
     {
         "listen": "$IPADDR:5200",
         "secret": "multipass",
@@ -233,7 +243,7 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
         "nodePrice": 0.0,
         "podPrice": 0.0,
         "image": "file://$TARGET_IMAGE",
-        "auto-provision": true,
+        "vm-provision": true,
         "kubeconfig": "$KUBECONFIG",
         "optionals": {
             "pricing": false,
@@ -251,13 +261,14 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
                 "--ignore-preflight-errors=All"
             ]
         },
+        "default-machine": "medium",
         "machines": $MACHINE_DEFS,
         "cloud-init": {
             "package_update": false,
             "package_upgrade": false,
             "users": $KUBERNETES_USER,
             "runcmd": [
-                "kubeadm config images pull"
+                "kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}"
             ],
             "ssh_authorized_keys": [
                 "$SSH_KEY"
@@ -272,7 +283,7 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
     }
 EOF
 else
-    cat > config/kubernetes-multipass-autoscaler.json <<-EOF
+    cat > /tmp/json <<-EOF
     {
         "listen": "$IPADDR:5200",
         "secret": "multipass",
@@ -281,7 +292,7 @@ else
         "nodePrice": 0.0,
         "podPrice": 0.0,
         "image": "bionic",
-        "auto-provision": true,
+        "vm-provision": true,
         "kubeconfig": "$KUBECONFIG",
         "optionals": {
             "pricing": false,
@@ -299,6 +310,7 @@ else
                 "--ignore-preflight-errors=All"
             ]
         },
+        "default-machine": "medium",
         "machines": $MACHINE_DEFS,
         "cloud-init": {
             "package_update": true,
@@ -324,6 +336,8 @@ else
 EOF
 
 fi
+
+cat /tmp/json | jq . > config/kubernetes-multipass-autoscaler.json
 
 HOSTS_DEF=$(multipass info masterkube|grep IPv4|awk "{print \$2 \"    masterkube.$DOMAIN_NAME masterkube-dashboard.$DOMAIN_NAME\"}")
 sudo sed -i '/masterkube/d' /etc/hosts
