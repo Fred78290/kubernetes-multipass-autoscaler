@@ -54,4 +54,9 @@ const (
 	errKubeCtlIgnoredError            = "kubectl got error on VM: %s, reason: %s"
 	errNotImplemented                 = "Not implemented"
 	errNodeIsNotReady                 = "Node %s is not ready"
+	errUnableToAutoProvisionNodeGroup = "Warning can't autoprovision node group, reason: %v"
+	errUnmarshallingError             = "Unable to unmarshall node: %s as json, reason: %v"
+	errMarshallingError               = "Unable to marshall node: %s as json, reason: %v"
+	errKubeletNotConfigured           = "Can't set provider ID in kubelet for VM: %s, reason: %v"
+	errVMNotProvisionnedByMe          = "The VM: %s is not provisionned by me"
 )
