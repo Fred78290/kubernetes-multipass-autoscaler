@@ -54,7 +54,12 @@
                             "--stderrthreshold=info",
                             "--cloud-provider=grpc",
                             "--cloud-config=/etc/cluster-autoscaler/grpc-config.conf",
-                            "--nodes=0:5:ca-grpc-multipass"
+                            "--nodes=0:3:ca-grpc-multipass",
+                            "--max-nodes-total=3",
+                            "--cores-total=0:3",
+                            "--memory-total=12:24",
+                            "--node-autoprovisioning-enabled",
+                            "--max-autoprovisioned-node-group-count=1"
                         ],
                         "imagePullPolicy": "Always",
                         "volumeMounts": [

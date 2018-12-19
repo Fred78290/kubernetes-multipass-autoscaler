@@ -8,8 +8,7 @@
         "kubeAdmToken": "$TOKEN",
         "kubeAdmCACert": "sha256:$CACERT",
         "kubeAdmExtraArguments": [
-            "--ignore-preflight-errors=All",
-            "--kubernetes-version=$KUBERNETES_VERSION"
+            "--ignore-preflight-errors=All"
         ]
     }
 }
