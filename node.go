@@ -28,12 +28,14 @@ const (
 
 // Describe a multipass VM
 type multipassNode struct {
-	nodeName string
-	memory   int
-	cpu      int
-	disk     int
-	address  []string
-	state    nodeState
+	providerID       string
+	nodeName         string
+	memory           int
+	cpu              int
+	disk             int
+	address          []string
+	state            nodeState
+	autoprovisionned bool
 }
 
 // VMDiskInfo describe VM disk usage
@@ -112,6 +114,31 @@ func shell(args ...string) error {
 	return nil
 }
 
+func (vm *multipassNode) prepareKubelet() error {
+	kubeletDefault := []string{
+		". /etc/default/kubelet",
+		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --provider-id=%s'\" > /etc/default/kubelet", vm.providerID),
+		"systemctl restart kubelet",
+	}
+
+	args := []string{
+		"multipass",
+		"exec",
+		vm.nodeName,
+		"--",
+		"sudo",
+		"bash",
+		"-c",
+		strings.Join(kubeletDefault[:], ";"),
+	}
+
+	if err := shell(args...); err != nil {
+		return fmt.Errorf(errKubeletNotConfigured, vm.nodeName, err)
+	}
+
+	return nil
+}
+
 func (vm *multipassNode) waitReady(kubeconfig string) error {
 	glog.V(5).Infof("multipassNode::waitReady, node:%s", vm.nodeName)
 
@@ -136,8 +163,8 @@ func (vm *multipassNode) waitReady(kubeconfig string) error {
 
 		var nodeInfo apiv1.Node
 
-		if err := json.Unmarshal([]byte(out), &nodeInfo); err != nil {
-			return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+		if err = json.Unmarshal([]byte(out), &nodeInfo); err != nil {
+			return fmt.Errorf(errUnmarshallingError, vm.nodeName, err)
 		}
 
 		glog.V(5).Infof("multipassNode::waitReady, %v", nodeInfo)
@@ -162,6 +189,64 @@ func (vm *multipassNode) waitReady(kubeconfig string) error {
 	return fmt.Errorf(errNodeIsNotReady, vm.nodeName)
 }
 
+func (vm *multipassNode) kubeAdmJoin(extras *nodeCreationExtra) error {
+	args := []string{
+		"multipass",
+		"exec",
+		vm.nodeName,
+		"--",
+		"sudo",
+		"kubeadm",
+		"join",
+		extras.kubeHost,
+		"--token",
+		extras.kubeToken,
+		"--discovery-token-ca-cert-hash",
+		extras.kubeCACert,
+	}
+
+	// Append extras arguments
+	if len(extras.kubeExtraArgs) > 0 {
+		args = append(args, extras.kubeExtraArgs...)
+	}
+
+	if err := shell(args...); err != nil {
+		return fmt.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
+	}
+
+	return nil
+}
+
+func (vm *multipassNode) setNodeLabels(extras *nodeCreationExtra) error {
+	if len(extras.nodeLabels)+len(extras.systemLabels) > 0 {
+
+		args := []string{
+			"kubectl",
+			"label",
+			"nodes",
+			vm.nodeName,
+		}
+
+		// Append extras arguments
+		for k, v := range extras.nodeLabels {
+			args = append(args, fmt.Sprintf("%s=%s", k, v))
+		}
+
+		for k, v := range extras.systemLabels {
+			args = append(args, fmt.Sprintf("%s=%s", k, v))
+		}
+
+		args = append(args, "--kubeconfig")
+		args = append(args, extras.kubeConfig)
+
+		if err := shell(args...); err != nil {
+			return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+		}
+	}
+
+	return nil
+}
+
 func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	glog.V(5).Infof("multipassNode::launchVM, node:%s", vm.nodeName)
 
@@ -169,153 +254,110 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	var err error
 	var status nodeState
 
+	if vm.autoprovisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	}
+
 	if vm.state != nodeStateNotCreated {
-		return fmt.Errorf(errVMAlreadyCreated, vm.nodeName)
-	}
+		err = fmt.Errorf(errVMAlreadyCreated, vm.nodeName)
+	} else {
+		if extras.cloudInit != nil && len(extras.cloudInit) > 0 {
+			var b []byte
 
-	if extras.cloudInit != nil && len(extras.cloudInit) > 0 {
-		var b []byte
+			fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.nodeName)
+			cloudInitFile, err = os.Create(fName)
+			if err != nil {
+				glog.Errorf(errTempFile, err)
+				return err
+			}
 
-		fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.nodeName)
-		cloudInitFile, err = os.Create(fName)
-		if err != nil {
-			glog.Errorf(errTempFile, err)
-			return err
-		}
+			defer os.Remove(fName)
 
-		defer os.Remove(cloudInitFile.Name())
+			b, err = yaml.Marshal(extras.cloudInit)
 
-		b, err = yaml.Marshal(extras.cloudInit)
+			if err != nil {
+				glog.Errorf(errCloudInitMarshallError, err)
+				return err
+			}
 
-		if err != nil {
-			glog.Errorf(errCloudInitMarshallError, err)
-			return err
-		}
-
-		if _, err = cloudInitFile.Write(b); err != nil {
-			glog.Errorf(errCloudInitWriteError, err)
-			return err
-		}
-	}
-
-	var args = []string{
-		"multipass",
-		"launch",
-		"--name",
-		vm.nodeName,
-	}
-
-	/*
-		Append VM attributes Memory,cpus, hard drive size....
-	*/
-	if vm.memory > 0 {
-		args = append(args, fmt.Sprintf("--mem=%dM", vm.memory))
-	}
-
-	if vm.cpu > 0 {
-		args = append(args, fmt.Sprintf("--cpus=%d", vm.cpu))
-	}
-
-	if vm.disk > 0 {
-		args = append(args, fmt.Sprintf("--disk=%dM", vm.disk))
-	}
-
-	// If cloud-init file is present
-	if cloudInitFile != nil {
-		args = append(args, fmt.Sprintf("--cloud-init=%s", cloudInitFile.Name()))
-	}
-
-	// If an image/url image
-	if len(extras.image) > 0 {
-		args = append(args, extras.image)
-	}
-
-	// Launch the VM and wait until finish launched
-	if err = shell(args...); err != nil {
-		glog.Errorf(errUnableToLaunchVM, vm.nodeName, err)
-		return err
-	}
-
-	// Add mount point
-	if extras.mountPoints != nil && len(extras.mountPoints) > 0 {
-		for hostPath, guestPath := range extras.mountPoints {
-			if err = shell("multipass", "mount", hostPath, fmt.Sprintf("%s:%s", vm.nodeName, guestPath)); err != nil {
-				glog.Warningf(errUnableToMountPath, hostPath, guestPath, vm.nodeName, err)
+			if _, err = cloudInitFile.Write(b); err != nil {
+				glog.Errorf(errCloudInitWriteError, err)
+				return err
 			}
 		}
-	}
 
-	status, err = vm.statusVM()
-
-	if err != nil {
-		glog.Error(err.Error())
-		return err
-	}
-
-	// If the VM is running call kubeadm join
-	if extras.autoprovision {
-		if status != nodeStateRunning {
-			return fmt.Errorf(errKubeAdmJoinNotRunning, vm.nodeName)
-		}
-
-		args = []string{
+		var args = []string{
 			"multipass",
-			"exec",
+			"launch",
+			"--name",
 			vm.nodeName,
-			"--",
-			"sudo",
-			"kubeadm",
-			"join",
-			extras.kubeHost,
-			"--token",
-			extras.kubeToken,
-			"--discovery-token-ca-cert-hash",
-			extras.kubeCACert,
 		}
 
-		// Append extras arguments
-		if len(extras.kubeExtraArgs) > 0 {
-			args = append(args, extras.kubeExtraArgs...)
+		/*
+			Append VM attributes Memory,cpus, hard drive size....
+		*/
+		if vm.memory > 0 {
+			args = append(args, fmt.Sprintf("--mem=%dM", vm.memory))
 		}
 
-		if err := shell(args...); err != nil {
-			glog.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
-			return fmt.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
+		if vm.cpu > 0 {
+			args = append(args, fmt.Sprintf("--cpus=%d", vm.cpu))
 		}
 
-		if err := vm.waitReady(extras.kubeConfig); err != nil {
-			return err
+		if vm.disk > 0 {
+			args = append(args, fmt.Sprintf("--disk=%dM", vm.disk))
 		}
 
-		if len(extras.nodeLabels)+len(extras.systemLabels) > 0 {
+		// If cloud-init file is present
+		if cloudInitFile != nil {
+			args = append(args, fmt.Sprintf("--cloud-init=%s", cloudInitFile.Name()))
+		}
 
-			args = []string{
-				"kubectl",
-				"label",
-				"nodes",
-				vm.nodeName,
+		// If an image/url image
+		if len(extras.image) > 0 {
+			args = append(args, extras.image)
+		}
+
+		// Launch the VM and wait until finish launched
+		if err = shell(args...); err != nil {
+			glog.Errorf(errUnableToLaunchVM, vm.nodeName, err)
+		} else {
+
+			// Add mount point
+			if extras.mountPoints != nil && len(extras.mountPoints) > 0 {
+				for hostPath, guestPath := range extras.mountPoints {
+					if err = shell("multipass", "mount", hostPath, fmt.Sprintf("%s:%s", vm.nodeName, guestPath)); err != nil {
+						glog.Warningf(errUnableToMountPath, hostPath, guestPath, vm.nodeName, err)
+					}
+				}
 			}
 
-			// Append extras arguments
-			for k, v := range extras.nodeLabels {
-				args = append(args, fmt.Sprintf("%s=%s", k, v))
-			}
+			if status, err = vm.statusVM(); err != nil {
+				glog.Error(err.Error())
+			} else if status == nodeStateRunning {
+				// If the VM is running call kubeadm join
+				if extras.vmprovision {
+					if err = vm.prepareKubelet(); err == nil {
+						if err = vm.kubeAdmJoin(extras); err == nil {
+							if err = vm.waitReady(extras.kubeConfig); err == nil {
+								if err = vm.setNodeLabels(extras); err != nil {
+									glog.Error(err.Error())
+								}
+							}
+						}
+					}
+				}
 
-			for k, v := range extras.systemLabels {
-				args = append(args, fmt.Sprintf("%s=%s", k, v))
-			}
-
-			args = append(args, "--kubeconfig")
-			args = append(args, extras.kubeConfig)
-
-			if err := shell(args...); err != nil {
-				glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
-				return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+				if err != nil {
+					glog.Error(err.Error())
+				}
+			} else {
+				err = fmt.Errorf(errKubeAdmJoinNotRunning, vm.nodeName)
 			}
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (vm *multipassNode) startVM(kubeconfig string) error {
@@ -323,6 +365,10 @@ func (vm *multipassNode) startVM(kubeconfig string) error {
 
 	var err error
 	var state nodeState
+
+	if vm.autoprovisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	}
 
 	state, err = vm.statusVM()
 
@@ -363,6 +409,10 @@ func (vm *multipassNode) stopVM(kubeconfig string) error {
 	var err error
 	var state nodeState
 
+	if vm.autoprovisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	}
+
 	state, err = vm.statusVM()
 
 	if err != nil {
@@ -401,6 +451,10 @@ func (vm *multipassNode) deleteVM(kubeconfig string) error {
 
 	var err error
 	var state nodeState
+
+	if vm.autoprovisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	}
 
 	state, err = vm.statusVM()
 

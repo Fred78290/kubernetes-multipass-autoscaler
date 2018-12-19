@@ -115,12 +115,13 @@ func TestMultipassServer_NodeGroups(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -178,12 +179,13 @@ func TestMultipassServer_NodeGroupForNode(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -624,12 +626,13 @@ func TestMultipassServer_DeleteNodes(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -681,12 +684,13 @@ func TestMultipassServer_DecreaseTargetSize(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -817,12 +821,13 @@ func TestMultipassServer_Nodes(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -987,12 +992,13 @@ func TestMultipassServer_Delete(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}
@@ -1103,12 +1109,13 @@ func TestMultipassServer_Belongs(t *testing.T) {
 		pendingNodes: make(map[string]*multipassNode),
 		nodes: map[string]*multipassNode{
 			testNodeName: &multipassNode{
-				nodeName: testNodeName,
-				memory:   4096,
-				cpu:      4,
-				disk:     5120,
-				address:  []string{},
-				state:    nodeStateNotCreated,
+				nodeName:         testNodeName,
+				memory:           4096,
+				cpu:              4,
+				disk:             5120,
+				address:          []string{},
+				state:            nodeStateNotCreated,
+				autoprovisionned: true,
 			},
 		},
 	}

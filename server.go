@@ -42,21 +42,21 @@ type MultipassServerOptionals struct {
 
 // MultipassServerConfig is contains configuration
 type MultipassServerConfig struct {
-	Listen        string                            `default:"0.0.0.0:5200" json:"listen"` // Mandatory, Address to listen
-	ProviderID    string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
-	MinNode       int                               `json:"minNode"`                       // Mandatory, Min Multipass VM
-	MaxNode       int                               `json:"maxNode"`                       // Mandatory, Max Multipass VM
-	NodePrice     float64                           `json:"nodePrice"`                     // Optional, The VM price
-	PodPrice      float64                           `json:"podPrice"`                      // Optional, The pod price
-	Autoprovision bool                              `default:"true" json:"autoprovision"`  // Mandatory, run kubeadm join or not
-	Image         string                            `json:"image"`                         // Optional, URL to multipass image or image name
-	KubeCtlConfig string                            `default:"/etc/kubernetes/config" json:"kubeconfig"`
-	KubeAdm       KubeJoinConfig                    `json:"kubeadm"`
-	Machines      map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
-	CloudInit     map[string]interface{}            `json:"cloud-init"`                            // Optional, The cloud init conf file
-	MountPoints   map[string]string                 `json:"mount-points"`                          // Optional, mount point between host and guest
-	AutoProvision bool                              `default:"true" json:"auto-provision"`
-	Optionals     *MultipassServerOptionals         `json:"optionals"`
+	Listen             string                            `default:"0.0.0.0:5200" json:"listen"` // Mandatory, Address to listen
+	ProviderID         string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
+	MinNode            int                               `json:"minNode"`                       // Mandatory, Min Multipass VM
+	MaxNode            int                               `json:"maxNode"`                       // Mandatory, Max Multipass VM
+	NodePrice          float64                           `json:"nodePrice"`                     // Optional, The VM price
+	PodPrice           float64                           `json:"podPrice"`                      // Optional, The pod price
+	Image              string                            `json:"image"`                         // Optional, URL to multipass image or image name
+	KubeCtlConfig      string                            `default:"/etc/kubernetes/config" json:"kubeconfig"`
+	KubeAdm            KubeJoinConfig                    `json:"kubeadm"`
+	DefaultMachineType string                            `default:"{\"standard\": {}}" json:"default-machine"`
+	Machines           map[string]*MachineCharacteristic `default:"{\"standard\": {}}" json:"machines"` // Mandatory, Available machines
+	CloudInit          map[string]interface{}            `json:"cloud-init"`                            // Optional, The cloud init conf file
+	MountPoints        map[string]string                 `json:"mount-points"`                          // Optional, mount point between host and guest
+	VMProvision        bool                              `default:"true" json:"vm-provision"`
+	Optionals          *MultipassServerOptionals         `json:"optionals"`
 }
 
 // MultipassServer declare multipass grpc server
@@ -65,13 +65,15 @@ type MultipassServer struct {
 	nodeGroups      map[string]*multipassNodeGroup
 	config          MultipassServerConfig
 	kubeAdmConfig   *apigrpc.KubeAdmConfig
+	nodes           []*apigrpc.NodeGroupDef
+	autoProvision   bool
 }
 
 func (s *MultipassServer) generateNodeGroupName() string {
 	return fmt.Sprintf("ng-%d", time.Now().Unix())
 }
 
-func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string) (*multipassNodeGroup, error) {
+func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string, autoProvision bool) (*multipassNodeGroup, error) {
 
 	machine := s.config.Machines[machineType]
 
@@ -81,19 +83,24 @@ func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeS
 
 	if nodeGroup := s.nodeGroups[nodeGroupID]; nodeGroup != nil {
 		glog.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
+
 		return nil, fmt.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
 	}
 
+	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node lables:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
+
 	nodeGroup := &multipassNodeGroup{
-		identifier:   nodeGroupID,
-		machine:      machine,
-		status:       nodegroupNotCreated,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes:        make(map[string]*multipassNode),
-		minSize:      int(minNodeSize),
-		maxSize:      int(maxNodeSize),
-		nodeLabels:   labels,
-		systemLabels: systemLabels,
+		cloudProviderID: s.config.ProviderID,
+		identifier:      nodeGroupID,
+		machine:         machine,
+		status:          nodegroupNotCreated,
+		pendingNodes:    make(map[string]*multipassNode),
+		nodes:           make(map[string]*multipassNode),
+		minSize:         int(minNodeSize),
+		maxSize:         int(maxNodeSize),
+		nodeLabels:      labels,
+		systemLabels:    systemLabels,
+		autoProvision:   autoProvision,
 	}
 
 	s.nodeGroups[nodeGroupID] = nodeGroup
@@ -108,6 +115,8 @@ func (s *MultipassServer) deleteNodeGroup(nodeGroupID string) error {
 		glog.Errorf(errNodeGroupNotFound, nodeGroupID)
 		return fmt.Errorf(errNodeGroupNotFound, nodeGroupID)
 	}
+
+	glog.Infof("Delete node group, ID:%s", nodeGroupID)
 
 	if err := nodeGroup.deleteNodeGroup(s.config.KubeCtlConfig); err != nil {
 		glog.Errorf(errUnableToDeleteNodeGroup, nodeGroupID, err)
@@ -131,6 +140,8 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 		// Must launch minNode VM
 		if nodeGroup.minSize > 0 {
 
+			glog.Infof("Create node group, ID:%s", nodeGroupID)
+
 			extras := &nodeCreationExtra{
 				kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
 				kubeToken:     s.kubeAdmConfig.KubeAdmToken,
@@ -142,11 +153,12 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 				mountPoints:   s.config.MountPoints,
 				nodeLabels:    nodeGroup.nodeLabels,
 				systemLabels:  nodeGroup.systemLabels,
-				autoprovision: s.config.AutoProvision,
+				vmprovision:   s.config.VMProvision,
 			}
 
 			if err := nodeGroup.addNodes(nodeGroup.minSize, extras); err != nil {
 				glog.Errorf(err.Error())
+
 				return nil, err
 			}
 		}
@@ -155,6 +167,42 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 	}
 
 	return nodeGroup, nil
+}
+
+func (s *MultipassServer) doAutoProvision() error {
+	glog.V(2).Info("Call server doAutoProvision")
+
+	var ng *multipassNodeGroup
+	var err error
+
+	for _, node := range s.nodes {
+		labels := make(map[string]string)
+		systemLabels := make(map[string]string)
+		nodeGroupIdentifier := node.GetNodeGroupID()
+
+		if len(nodeGroupIdentifier) > 0 {
+
+			if s.nodeGroups[nodeGroupIdentifier] == nil {
+				glog.V(2).Info("Do auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, node.MinSize, node.MaxSize)
+
+				labels["cluster.autoscaler.nodegroup/name"] = nodeGroupIdentifier
+
+				if _, err = s.newNodeGroup(nodeGroupIdentifier, node.MinSize, node.MaxSize, s.config.DefaultMachineType, labels, systemLabels, true); err == nil {
+					if ng, err = s.createNodeGroup(nodeGroupIdentifier); err == nil {
+						if err = ng.autoDiscoveryNodes(s.config.KubeCtlConfig); err == nil {
+							return err
+						}
+					}
+				}
+
+				if err != nil {
+					break
+				}
+			}
+		}
+	}
+
+	return err
 }
 
 // Connect allows client to connect
@@ -170,6 +218,17 @@ func (s *MultipassServer) Connect(ctx context.Context, request *apigrpc.ConnectR
 		s.resourceLimiter = &resourceLimiter{
 			minLimits: request.ResourceLimiter.MinLimits,
 			maxLimits: request.ResourceLimiter.MaxLimits,
+		}
+	}
+
+	s.nodes = request.GetNodes()
+	s.autoProvision = request.GetAutoProvisionned()
+
+	if s.autoProvision {
+		if err := s.doAutoProvision(); err != nil {
+			glog.Errorf(errUnableToAutoProvisionNodeGroup, err)
+
+			return nil, err
 		}
 	}
 
@@ -243,7 +302,7 @@ func (s *MultipassServer) nodeGroupForNode(providerID string) (*multipassNodeGro
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupForNodeNotFound, nodeGroupID, providerID)
 
-		return nil, fmt.Errorf(errNodeGroupForNodeNotFound, nodeGroupID, providerID)
+		//return nil, fmt.Errorf(errNodeGroupForNodeNotFound, nodeGroupID, providerID)
 	}
 
 	return nodeGroup, err
@@ -275,6 +334,14 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 		}, nil
 	}
 
+	if len(node.Spec.ProviderID) == 0 {
+		return &apigrpc.NodeGroupForNodeReply{
+			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
+				NodeGroup: &apigrpc.NodeGroup{},
+			},
+		}, nil
+	}
+
 	nodeGroup, err := s.nodeGroupForNode(node.Spec.ProviderID)
 
 	if err != nil {
@@ -284,6 +351,14 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 					Code:   cloudProviderError,
 					Reason: err.Error(),
 				},
+			},
+		}, nil
+	}
+
+	if nodeGroup == nil {
+		return &apigrpc.NodeGroupForNodeReply{
+			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
+				NodeGroup: &apigrpc.NodeGroup{},
 			},
 		}, nil
 	}
@@ -404,7 +479,7 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 
 	labels["cluster.autoscaler.nodegroup/name"] = nodeGroupIdentifier
 
-	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMinNodeSize(), request.GetMaxNodeSize(), request.GetMachineType(), labels, systemLabels)
+	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMinNodeSize(), request.GetMaxNodeSize(), request.GetMachineType(), labels, systemLabels, false)
 
 	if err != nil {
 		glog.Errorf(errUnableToCreateNodeGroup, nodeGroupIdentifier, err)
@@ -635,7 +710,7 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 		mountPoints:   s.config.MountPoints,
 		nodeLabels:    nodeGroup.nodeLabels,
 		systemLabels:  nodeGroup.systemLabels,
-		autoprovision: s.config.AutoProvision,
+		vmprovision:   s.config.VMProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -810,7 +885,7 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 		mountPoints:   s.config.MountPoints,
 		nodeLabels:    nodeGroup.nodeLabels,
 		systemLabels:  nodeGroup.systemLabels,
-		autoprovision: s.config.AutoProvision,
+		vmprovision:   s.config.VMProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -903,7 +978,7 @@ func (s *MultipassServer) Nodes(ctx context.Context, request *apigrpc.NodeGroupS
 
 	for nodeName, node := range nodeGroup.nodes {
 		instances = append(instances, &apigrpc.Instance{
-			Id: nodeGroup.providerIDForNode(s.config.ProviderID, nodeName),
+			Id: nodeGroup.providerIDForNode(nodeName),
 			Status: &apigrpc.InstanceStatus{
 				State:     apigrpc.InstanceState(node.state),
 				ErrorInfo: nil,
@@ -955,7 +1030,7 @@ func (s *MultipassServer) TemplateNodeInfo(ctx context.Context, request *apigrpc
 
 	node := &apiv1.Node{
 		Spec: apiv1.NodeSpec{
-			ProviderID:    nodeGroup.providerID(s.config.ProviderID),
+			ProviderID:    nodeGroup.providerID(),
 			Unschedulable: false,
 		},
 	}
@@ -1058,13 +1133,21 @@ func (s *MultipassServer) Delete(ctx context.Context, request *apigrpc.NodeGroup
 func (s *MultipassServer) Autoprovisioned(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.AutoprovisionedReply, error) {
 	glog.V(2).Infof("Call server Autoprovisioned: %v", request)
 
+	var b bool
+
 	if request.GetProviderID() != s.config.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
+	ng := s.nodeGroups[request.GetNodeGroupID()]
+
+	if ng != nil {
+		b = ng.autoProvision
+	}
+
 	return &apigrpc.AutoprovisionedReply{
-		Autoprovisioned: true,
+		Autoprovisioned: b,
 	}, nil
 }
 
