@@ -77,7 +77,7 @@ systemctl enable kubelet
 echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
 export PATH=/opt/cni/bin:/usr/local/bin:\$PATH
 
-kubeadm config images pull
+kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
 
 echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
