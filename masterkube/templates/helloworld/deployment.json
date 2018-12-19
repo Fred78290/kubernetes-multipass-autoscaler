@@ -22,7 +22,7 @@
                 }
             },
             "spec": {
-                "hostNetwork": false,
+                "hostNetwork": true,
                 "restartPolicy": "Always",
                 "terminationGracePeriodSeconds": 30,
                 "dnsPolicy": "ClusterFirstWithHostNet",

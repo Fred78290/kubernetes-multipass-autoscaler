@@ -41,7 +41,7 @@
                             "--healthz-port=10254",
                             "--http-port=80",
                             "--https-port=443",
-                            "--status-port=8080",
+                            "--status-port=81",
                             "--configmap=$K8NAMESPACE/masterkube-nginx-configuration",
                             "--tcp-services-configmap=$K8NAMESPACE/masterkube-tcp-services",
                             "--udp-services-configmap=$K8NAMESPACE/masterkube-udp-services",
