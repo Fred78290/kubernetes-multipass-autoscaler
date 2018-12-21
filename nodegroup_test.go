@@ -71,14 +71,14 @@ func Test_multipassNode_launchVM(t *testing.T) {
 	if assert.NoError(t, err) {
 		for _, tt := range testNode {
 			t.Run(tt.name, func(t *testing.T) {
-				vm := &multipassNode{
-					nodeName:         tt.vm.name,
-					memory:           tt.vm.memory,
-					cpu:              tt.vm.cpu,
-					disk:             tt.vm.disk,
-					address:          tt.vm.address,
-					state:            nodeStateNotCreated,
-					autoprovisionned: true,
+				vm := &MultipassNode{
+					NodeName:         tt.vm.name,
+					Memory:           tt.vm.memory,
+					CPU:              tt.vm.cpu,
+					Disk:             tt.vm.disk,
+					Addresses:        tt.vm.address,
+					State:            MultipassNodeStateNotCreated,
+					AutoProvisionned: true,
 				}
 
 				nodeLabels := map[string]string{
@@ -111,14 +111,14 @@ func Test_multipassNode_launchVM(t *testing.T) {
 func Test_multipassNode_startVM(t *testing.T) {
 	for _, tt := range testNode {
 		t.Run(tt.name, func(t *testing.T) {
-			vm := &multipassNode{
-				nodeName:         tt.vm.name,
-				memory:           tt.vm.memory,
-				cpu:              tt.vm.cpu,
-				disk:             tt.vm.disk,
-				address:          tt.vm.address,
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+			vm := &MultipassNode{
+				NodeName:         tt.vm.name,
+				Memory:           tt.vm.memory,
+				CPU:              tt.vm.cpu,
+				Disk:             tt.vm.disk,
+				Addresses:        tt.vm.address,
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			}
 			if err := vm.startVM(kubeconfig); (err != nil) != tt.wantErr {
 				t.Errorf("multipassNode.startVM() error = %v, wantErr %v", err, tt.wantErr)
@@ -130,14 +130,14 @@ func Test_multipassNode_startVM(t *testing.T) {
 func Test_multipassNode_stopVM(t *testing.T) {
 	for _, tt := range testNode {
 		t.Run(tt.name, func(t *testing.T) {
-			vm := &multipassNode{
-				nodeName:         tt.vm.name,
-				memory:           tt.vm.memory,
-				cpu:              tt.vm.cpu,
-				disk:             tt.vm.disk,
-				address:          tt.vm.address,
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+			vm := &MultipassNode{
+				NodeName:         tt.vm.name,
+				Memory:           tt.vm.memory,
+				CPU:              tt.vm.cpu,
+				Disk:             tt.vm.disk,
+				Addresses:        tt.vm.address,
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			}
 			if err := vm.stopVM(kubeconfig); (err != nil) != tt.wantErr {
 				t.Errorf("multipassNode.stopVM() error = %v, wantErr %v", err, tt.wantErr)
@@ -149,14 +149,14 @@ func Test_multipassNode_stopVM(t *testing.T) {
 func Test_multipassNode_deleteVM(t *testing.T) {
 	for _, tt := range testNode {
 		t.Run(tt.name, func(t *testing.T) {
-			vm := &multipassNode{
-				nodeName:         tt.vm.name,
-				memory:           tt.vm.memory,
-				cpu:              tt.vm.cpu,
-				disk:             tt.vm.disk,
-				address:          tt.vm.address,
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+			vm := &MultipassNode{
+				NodeName:         tt.vm.name,
+				Memory:           tt.vm.memory,
+				CPU:              tt.vm.cpu,
+				Disk:             tt.vm.disk,
+				Addresses:        tt.vm.address,
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			}
 			if err := vm.deleteVM(kubeconfig); (err != nil) != tt.wantErr {
 				t.Errorf("multipassNode.deleteVM() error = %v, wantErr %v", err, tt.wantErr)
@@ -168,22 +168,22 @@ func Test_multipassNode_deleteVM(t *testing.T) {
 func Test_multipassNode_statusVM(t *testing.T) {
 	for _, tt := range testNode {
 		t.Run(tt.name, func(t *testing.T) {
-			vm := &multipassNode{
-				nodeName:         tt.vm.name,
-				memory:           tt.vm.memory,
-				cpu:              tt.vm.cpu,
-				disk:             tt.vm.disk,
-				address:          tt.vm.address,
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+			vm := &MultipassNode{
+				NodeName:         tt.vm.name,
+				Memory:           tt.vm.memory,
+				CPU:              tt.vm.cpu,
+				Disk:             tt.vm.disk,
+				Addresses:        tt.vm.address,
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			}
 			got, err := vm.statusVM()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("multipassNode.statusVM() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if got != nodeStateRunning {
-				t.Errorf("multipassNode.statusVM() = %v, want %v", got, nodeStateRunning)
+			if got != MultipassNodeStateRunning {
+				t.Errorf("multipassNode.statusVM() = %v, want %v", got, MultipassNodeStateRunning)
 			}
 		})
 	}
@@ -202,15 +202,15 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 			image:         config.Image,
 			cloudInit:     config.CloudInit,
 			mountPoints:   config.MountPoints,
-			nodeLabels:    testNodeGroup.nodeLabels,
-			systemLabels:  testNodeGroup.systemLabels,
+			nodeLabels:    testNodeGroup.NodeLabels,
+			systemLabels:  testNodeGroup.SystemLabels,
 			vmprovision:   config.VMProvision,
 		}
 
 		tests := []struct {
 			name    string
 			delta   int
-			ng      *multipassNodeGroup
+			ng      *MultipassNodeGroup
 			wantErr bool
 		}{
 			{
@@ -224,7 +224,7 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				if err := tt.ng.addNodes(tt.delta, extras); (err != nil) != tt.wantErr {
-					t.Errorf("multipassNodeGroup.addNode() error = %v, wantErr %v", err, tt.wantErr)
+					t.Errorf("MultipassNodeGroup.addNode() error = %v, wantErr %v", err, tt.wantErr)
 				}
 			})
 		}
@@ -232,27 +232,27 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 }
 
 func Test_multipassNodeGroup_deleteNode(t *testing.T) {
-	ng := &multipassNodeGroup{
-		cloudProviderID: testProviderID,
-		identifier:      testGroupID,
-		machine: &MachineCharacteristic{
+	ng := &MultipassNodeGroup{
+		ServiceIdentifier:   testProviderID,
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -261,7 +261,7 @@ func Test_multipassNodeGroup_deleteNode(t *testing.T) {
 		name     string
 		delta    int
 		nodeName string
-		ng       *multipassNodeGroup
+		ng       *MultipassNodeGroup
 		wantErr  bool
 	}{
 		{
@@ -276,34 +276,34 @@ func Test_multipassNodeGroup_deleteNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.ng.deleteNodeByName(kubeconfig, tt.nodeName); (err != nil) != tt.wantErr {
-				t.Errorf("multipassNodeGroup.deleteNode() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("MultipassNodeGroup.deleteNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
 }
 
 func Test_multipassNodeGroup_deleteNodeGroup(t *testing.T) {
-	ng := &multipassNodeGroup{
-		cloudProviderID: testProviderID,
-		identifier:      testGroupID,
-		machine: &MachineCharacteristic{
+	ng := &MultipassNodeGroup{
+		ServiceIdentifier:   testProviderID,
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -312,7 +312,7 @@ func Test_multipassNodeGroup_deleteNodeGroup(t *testing.T) {
 		name     string
 		delta    int
 		nodeName string
-		ng       *multipassNodeGroup
+		ng       *MultipassNodeGroup
 		wantErr  bool
 	}{
 		{
@@ -326,7 +326,7 @@ func Test_multipassNodeGroup_deleteNodeGroup(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := tt.ng.deleteNodeGroup(kubeconfig); (err != nil) != tt.wantErr {
-				t.Errorf("multipassNodeGroup.deleteNodeGroup() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("MultipassNodeGroup.deleteNodeGroup() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

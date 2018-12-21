@@ -3,37 +3,46 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/golang/glog"
 	apiv1 "k8s.io/api/core/v1"
 )
 
-type nodegroupState int32
+// NodeGroupState describe the nodegroup status
+type NodeGroupState int32
 
 const (
-	nodegroupNotCreated nodegroupState = 0
-	nodegroupCreated    nodegroupState = 1
-	nodegroupDeleting   nodegroupState = 2
-	nodegroupDeleted    nodegroupState = 3
+	// NodegroupNotCreated not created state
+	NodegroupNotCreated NodeGroupState = 0
+
+	// NodegroupCreated create state
+	NodegroupCreated NodeGroupState = 1
+
+	// NodegroupDeleting deleting status
+	NodegroupDeleting NodeGroupState = 2
+
+	// NodegroupDeleted deleted status
+	NodegroupDeleted NodeGroupState = 3
 )
 
-// Group all multipass VM created inside a NodeGroup
+// MultipassNodeGroup Group all multipass VM created inside a NodeGroup
 // Each node have name like <node group name>-vm-<vm index>
-type multipassNodeGroup struct {
+type MultipassNodeGroup struct {
 	sync.Mutex
-	identifier      string
-	cloudProviderID string
-	machine         *MachineCharacteristic
-	status          nodegroupState
-	minSize         int
-	maxSize         int
-	nodes           map[string]*multipassNode
-	pendingNodes    map[string]*multipassNode
-	pendingNodesWG  sync.WaitGroup
-	nodeLabels      map[string]string
-	systemLabels    map[string]string
-	autoProvision   bool
+	NodeGroupIdentifier string                    `json:"identifier"`
+	ServiceIdentifier   string                    `json:"service"`
+	Machine             *MachineCharacteristic    `json:"machine"`
+	Status              NodeGroupState            `json:"status"`
+	MinNodeSize         int                       `json:"minSize"`
+	MaxNodeSize         int                       `json:"maxSize"`
+	Nodes               map[string]*MultipassNode `json:"nodes"`
+	NodeLabels          map[string]string         `json:"nodeLabels"`
+	SystemLabels        map[string]string         `json:"systemLabels"`
+	AutoProvision       bool                      `json:"auto-provision"`
+	PendingNodes        map[string]*MultipassNode `json:"-"`
+	PendingNodesWG      sync.WaitGroup            `json:"-"`
 }
 
 type nodeCreationExtra struct {
@@ -50,38 +59,38 @@ type nodeCreationExtra struct {
 	vmprovision   bool
 }
 
-func (g *multipassNodeGroup) cleanup(kubeconfig string) error {
-	glog.V(5).Infof("multipassNodeGroup::cleanup, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) cleanup(kubeconfig string) error {
+	glog.V(5).Infof("MultipassNodeGroup::cleanup, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	var lastError error
 
-	g.status = nodegroupDeleting
+	g.Status = NodegroupDeleting
 
-	g.pendingNodesWG.Wait()
+	g.PendingNodesWG.Wait()
 
-	glog.V(5).Infof("multipassNodeGroup::cleanup, nodeGroupID:%s, iterate node to delete", g.identifier)
+	glog.V(5).Infof("MultipassNodeGroup::cleanup, nodeGroupID:%s, iterate node to delete", g.NodeGroupIdentifier)
 
-	for _, node := range g.nodes {
+	for _, node := range g.Nodes {
 		if lastError = node.deleteVM(kubeconfig); lastError != nil {
-			glog.Errorf(errNodeGroupCleanupFailOnVM, g.identifier, node.nodeName, lastError)
+			glog.Errorf(errNodeGroupCleanupFailOnVM, g.NodeGroupIdentifier, node.NodeName, lastError)
 		}
 	}
 
-	g.nodes = make(map[string]*multipassNode)
-	g.pendingNodes = make(map[string]*multipassNode)
-	g.status = nodegroupDeleted
+	g.Nodes = make(map[string]*MultipassNode)
+	g.PendingNodes = make(map[string]*MultipassNode)
+	g.Status = NodegroupDeleted
 
 	return lastError
 }
 
-func (g *multipassNodeGroup) targetSize() int {
-	glog.V(5).Infof("multipassNodeGroup::targetSize, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) targetSize() int {
+	glog.V(5).Infof("MultipassNodeGroup::targetSize, nodeGroupID:%s", g.NodeGroupIdentifier)
 
-	return len(g.pendingNodes) + len(g.nodes)
+	return len(g.PendingNodes) + len(g.Nodes)
 }
 
-func (g *multipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationExtra) error {
-	glog.V(5).Infof("multipassNodeGroup::setNodeGroupSize, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("MultipassNodeGroup::setNodeGroupSize, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	var err error
 
@@ -100,28 +109,28 @@ func (g *multipassNodeGroup) setNodeGroupSize(newSize int, extras *nodeCreationE
 	return err
 }
 
-func (g *multipassNodeGroup) refresh() {
-	glog.V(5).Infof("multipassNodeGroup::refresh, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) refresh() {
+	glog.V(5).Infof("MultipassNodeGroup::refresh, nodeGroupID:%s", g.NodeGroupIdentifier)
 
-	for _, node := range g.nodes {
+	for _, node := range g.Nodes {
 		node.statusVM()
 	}
 }
 
 // delta must be negative!!!!
-func (g *multipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) error {
-	glog.V(5).Infof("multipassNodeGroup::deleteNodes, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("MultipassNodeGroup::deleteNodes, nodeGroupID:%s", g.NodeGroupIdentifier)
 
-	startIndex := len(g.nodes) - 1
+	startIndex := len(g.Nodes) - 1
 	endIndex := startIndex + delta
-	tempNodes := make([]*multipassNode, 0, -delta)
+	tempNodes := make([]*MultipassNode, 0, -delta)
 
 	for nodeIndex := startIndex; nodeIndex >= endIndex; nodeIndex-- {
 		nodeName := g.nodeName(nodeIndex)
 
-		if node := g.nodes[nodeName]; node != nil {
+		if node := g.Nodes[nodeName]; node != nil {
 			if err := node.deleteVM(extras.kubeConfig); err != nil {
-				glog.Errorf(errUnableToDeleteVM, node.nodeName)
+				glog.Errorf(errUnableToDeleteVM, node.NodeName)
 				return err
 			}
 
@@ -130,77 +139,77 @@ func (g *multipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) e
 	}
 
 	for _, node := range tempNodes {
-		delete(g.nodes, node.nodeName)
+		delete(g.Nodes, node.NodeName)
 	}
 
 	return nil
 }
 
-func (g *multipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) error {
-	glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) error {
+	glog.V(5).Infof("MultipassNodeGroup::addNodes, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	startIndex := g.targetSize()
 	endIndex := startIndex + delta
-	tempNodes := make([]*multipassNode, 0, delta)
+	tempNodes := make([]*MultipassNode, 0, delta)
 
-	g.pendingNodesWG.Add(delta)
+	g.PendingNodesWG.Add(delta)
 
 	for nodeIndex := startIndex; nodeIndex < endIndex; nodeIndex++ {
-		if g.status != nodegroupCreated {
-			glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.identifier)
+		if g.Status != NodegroupCreated {
+			glog.V(5).Infof("MultipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
 			break
 		}
 
 		nodeName := g.nodeName(nodeIndex)
 
-		node := &multipassNode{
-			providerID:       g.providerIDForNode(nodeName),
-			nodeName:         nodeName,
-			memory:           g.machine.Memory,
-			cpu:              g.machine.Vcpu,
-			disk:             g.machine.Disk,
-			autoprovisionned: true,
+		node := &MultipassNode{
+			ProviderID:       g.providerIDForNode(nodeName),
+			NodeName:         nodeName,
+			Memory:           g.Machine.Memory,
+			CPU:              g.Machine.Vcpu,
+			Disk:             g.Machine.Disk,
+			AutoProvisionned: true,
 		}
 
 		tempNodes = append(tempNodes, node)
 
-		g.pendingNodes[node.nodeName] = node
+		g.PendingNodes[node.NodeName] = node
 	}
 
 	for _, node := range tempNodes {
-		if g.status != nodegroupCreated {
-			glog.V(5).Infof("multipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.identifier)
+		if g.Status != NodegroupCreated {
+			glog.V(5).Infof("MultipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
 			break
 		}
 
 		if err := node.launchVM(extras); err != nil {
-			glog.Errorf(errUnableToLaunchVM, node.nodeName, err)
+			glog.Errorf(errUnableToLaunchVM, node.NodeName, err)
 
 			for _, node := range tempNodes {
-				delete(g.pendingNodes, node.nodeName)
+				delete(g.PendingNodes, node.NodeName)
 
-				if status, _ := node.statusVM(); status == nodeStateRunning {
+				if status, _ := node.statusVM(); status == MultipassNodeStateRunning {
 					if err := node.deleteVM(extras.kubeConfig); err != nil {
-						glog.Errorf(errUnableToDeleteVM, node.nodeName)
+						glog.Errorf(errUnableToDeleteVM, node.NodeName)
 					}
 				}
 
-				g.pendingNodesWG.Done()
+				g.PendingNodesWG.Done()
 			}
 
 			return err
 		}
 
-		delete(g.pendingNodes, node.nodeName)
+		delete(g.PendingNodes, node.NodeName)
 
-		g.nodes[node.nodeName] = node
-		g.pendingNodesWG.Done()
+		g.Nodes[node.NodeName] = node
+		g.PendingNodesWG.Done()
 	}
 
 	return nil
 }
 
-func (g *multipassNodeGroup) autoDiscoveryNodes(kubeconfig string) error {
+func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconfig string) error {
 	var nodeInfos apiv1.NodeList
 	var out string
 	var err error
@@ -219,20 +228,22 @@ func (g *multipassNodeGroup) autoDiscoveryNodes(kubeconfig string) error {
 	}
 
 	if err = json.Unmarshal([]byte(out), &nodeInfos); err != nil {
-		return fmt.Errorf(errUnmarshallingError, "multipassNodeGroup::autoDiscoveryNodes", err)
+		return fmt.Errorf(errUnmarshallingError, "MultipassNodeGroup::autoDiscoveryNodes", err)
 	}
 
+	g.Nodes = make(map[string]*MultipassNode)
+
 	for _, nodeInfo := range nodeInfos.Items {
-		var providerID = nodeInfo.Spec.ProviderID
+		var providerID = getNodeProviderID(g.ServiceIdentifier, &nodeInfo)
 		var nodeID = ""
 
 		if len(providerID) > 0 {
-			out, err = nodeGroupIDFromProviderID(g.cloudProviderID, providerID)
+			out, err = nodeGroupIDFromProviderID(g.ServiceIdentifier, providerID)
 
-			if out == g.identifier {
-				glog.V(2).Infof("Discover node:%s matching nodegroup:%s", providerID, g.identifier)
+			if out == g.NodeGroupIdentifier {
+				glog.V(2).Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
 
-				if nodeID, err = nodeNameFromProviderID(g.cloudProviderID, providerID); err == nil {
+				if nodeID, err = nodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
 					runningIP := ""
 
 					for _, address := range nodeInfo.Status.Addresses {
@@ -242,19 +253,52 @@ func (g *multipassNodeGroup) autoDiscoveryNodes(kubeconfig string) error {
 						}
 					}
 
-					glog.V(2).Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.identifier)
+					glog.V(2).Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
 
-					node := &multipassNode{
-						providerID:       providerID,
-						nodeName:         nodeID,
-						state:            nodeStateRunning,
-						autoprovisionned: false,
-						address: []string{
+					node := &MultipassNode{
+						ProviderID:       providerID,
+						NodeName:         nodeID,
+						State:            MultipassNodeStateRunning,
+						AutoProvisionned: nodeInfo.Annotations[annotationNodeAutoProvisionned] == "true",
+						Addresses: []string{
 							runningIP,
 						},
 					}
 
-					g.nodes[nodeID] = node
+					g.Nodes[nodeID] = node
+
+					node.statusVM()
+
+					arg = []string{
+						"kubectl",
+						"annotate",
+						"node",
+						nodeInfo.Name,
+						fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
+						fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
+						"--overwrite",
+						"--kubeconfig",
+						kubeconfig,
+					}
+
+					if err := shell(arg...); err != nil {
+						glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
+					}
+
+					arg = []string{
+						"kubectl",
+						"label",
+						"nodes",
+						nodeInfo.Name,
+						fmt.Sprintf("%s=%s", nodeLabelGroupName, g.NodeGroupIdentifier),
+						"--overwrite",
+						"--kubeconfig",
+						kubeconfig,
+					}
+
+					if err := shell(arg...); err != nil {
+						glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
+					}
 				}
 			}
 		}
@@ -263,38 +307,38 @@ func (g *multipassNodeGroup) autoDiscoveryNodes(kubeconfig string) error {
 	return nil
 }
 
-func (g *multipassNodeGroup) deleteNodeByName(kubeconfig, nodeName string) error {
-	glog.V(5).Infof("multipassNodeGroup::deleteNodeByName, nodeGroupID:%s, nodeName:%s", g.identifier, nodeName)
+func (g *MultipassNodeGroup) deleteNodeByName(kubeconfig, nodeName string) error {
+	glog.V(5).Infof("MultipassNodeGroup::deleteNodeByName, nodeGroupID:%s, nodeName:%s", g.NodeGroupIdentifier, nodeName)
 
-	if node := g.nodes[nodeName]; node != nil {
+	if node := g.Nodes[nodeName]; node != nil {
 
 		if err := node.deleteVM(kubeconfig); err != nil {
-			glog.Errorf(errUnableToDeleteVM, node.nodeName)
+			glog.Errorf(errUnableToDeleteVM, node.NodeName)
 			return err
 		}
 
-		delete(g.nodes, nodeName)
+		delete(g.Nodes, nodeName)
 
 		return nil
 	}
 
-	return fmt.Errorf(errNodeNotFoundInNodeGroup, nodeName, g.identifier)
+	return fmt.Errorf(errNodeNotFoundInNodeGroup, nodeName, g.NodeGroupIdentifier)
 }
 
-func (g *multipassNodeGroup) deleteNodeGroup(kubeConfig string) error {
-	glog.V(5).Infof("multipassNodeGroup::deleteNodeGroup, nodeGroupID:%s", g.identifier)
+func (g *MultipassNodeGroup) deleteNodeGroup(kubeConfig string) error {
+	glog.V(5).Infof("MultipassNodeGroup::deleteNodeGroup, nodeGroupID:%s", g.NodeGroupIdentifier)
 
 	return g.cleanup(kubeConfig)
 }
 
-func (g *multipassNodeGroup) nodeName(vmIndex int) string {
-	return fmt.Sprintf("%s-vm-%02d", g.identifier, vmIndex)
+func (g *MultipassNodeGroup) nodeName(vmIndex int) string {
+	return fmt.Sprintf("%s-vm-%02d", g.NodeGroupIdentifier, vmIndex)
 }
 
-func (g *multipassNodeGroup) providerID() string {
-	return fmt.Sprintf("%s://%s/object?type=group", g.cloudProviderID, g.identifier)
+func (g *MultipassNodeGroup) providerID() string {
+	return fmt.Sprintf("%s://%s/object?type=group", g.ServiceIdentifier, g.NodeGroupIdentifier)
 }
 
-func (g *multipassNodeGroup) providerIDForNode(nodeName string) string {
-	return fmt.Sprintf("%s://%s/object?type=node&name=%s", g.cloudProviderID, g.identifier, nodeName)
+func (g *MultipassNodeGroup) providerIDForNode(nodeName string) string {
+	return fmt.Sprintf("%s://%s/object?type=node&name=%s", g.ServiceIdentifier, g.NodeGroupIdentifier, nodeName)
 }

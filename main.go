@@ -33,17 +33,26 @@ import (
 
 var phVersion = "v0.0.0-unset"
 var phBuildDate = ""
+var phSavedState = ""
+var phMultipassServer *MultipassServer
+var phSaveState bool
 
 func main() {
 	var config MultipassServerConfig
 
 	versionPtr := flag.Bool("version", false, "Give the version")
+	savePtr := flag.String("save", "", "The file to persists the server")
 	configPtr := flag.String("config", "/etc/default/multipass-cluster-autoscaler.json", "The config for the server")
 	flag.Parse()
 
 	if *versionPtr {
 		log.Printf("The current version is:%s, build at:%s", phVersion, phBuildDate)
 	} else {
+		if len(*savePtr) > 0 {
+			phSavedState = *savePtr
+			phSaveState = true
+		}
+
 		file, err := os.Open(*configPtr)
 		if err != nil {
 			glog.Fatalf("failed to open config file:%s, error:%v", *configPtr, err)
@@ -54,16 +63,6 @@ func main() {
 		if err != nil {
 			glog.Fatalf("failed to decode config file:%s, error:%v", *configPtr, err)
 		}
-
-		glog.V(2).Infof("Start listening server")
-
-		lis, err := net.Listen("tcp", config.Listen)
-
-		if err != nil {
-			glog.Fatalf("failed to listen: %v", err)
-		}
-
-		server := grpc.NewServer()
 
 		if config.Optionals == nil {
 			config.Optionals = &MultipassServerOptionals{
@@ -83,19 +82,43 @@ func main() {
 			KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
 		}
 
-		multipassserver := &MultipassServer{
-			resourceLimiter: &resourceLimiter{
-				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
-				map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
-			},
-			config:        config,
-			nodeGroups:    make(map[string]*multipassNodeGroup),
-			kubeAdmConfig: kubeAdmConfig,
+		if phSaveState == false || fileExists(phSavedState) == false {
+			phMultipassServer = &MultipassServer{
+				ResourceLimiter: &ResourceLimiter{
+					map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
+					map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
+				},
+				Configuration:        config,
+				Groups:               make(map[string]*MultipassNodeGroup),
+				KubeAdmConfiguration: kubeAdmConfig,
+			}
+
+			if phSaveState {
+				if err := phMultipassServer.save(phSavedState); err != nil {
+					log.Fatalf(errFailedToSaveServerState, err)
+				}
+			}
+		} else {
+			phMultipassServer = &MultipassServer{}
+
+			if err := phMultipassServer.load(phSavedState); err != nil {
+				log.Fatalf(errFailedToLoadServerState, err)
+			}
 		}
 
-		apigrc.RegisterCloudProviderServiceServer(server, multipassserver)
-		apigrc.RegisterNodeGroupServiceServer(server, multipassserver)
-		apigrc.RegisterPricingModelServiceServer(server, multipassserver)
+		glog.V(2).Infof("Start listening server on %s", config.Listen)
+
+		lis, err := net.Listen("tcp", config.Listen)
+
+		if err != nil {
+			glog.Fatalf("failed to listen: %v", err)
+		}
+
+		server := grpc.NewServer()
+
+		apigrc.RegisterCloudProviderServiceServer(server, phMultipassServer)
+		apigrc.RegisterNodeGroupServiceServer(server, phMultipassServer)
+		apigrc.RegisterPricingModelServiceServer(server, phMultipassServer)
 
 		reflection.Register(server)
 

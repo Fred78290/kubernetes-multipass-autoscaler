@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/exec"
 	"strconv"
@@ -16,26 +17,36 @@ import (
 	"github.com/golang/glog"
 )
 
-type nodeState int32
+// MultipassNodeState VM state
+type MultipassNodeState int32
 
 const (
-	nodeStateNotCreated nodeState = 0
-	nodeStateRunning    nodeState = 1
-	nodeStateStopped    nodeState = 2
-	nodeStateDeleted    nodeState = 3
-	nodeStateUndefined  nodeState = 4
+	// MultipassNodeStateNotCreated not created state
+	MultipassNodeStateNotCreated MultipassNodeState = 0
+
+	// MultipassNodeStateRunning running state
+	MultipassNodeStateRunning MultipassNodeState = 1
+
+	// MultipassNodeStateStopped stopped state
+	MultipassNodeStateStopped MultipassNodeState = 2
+
+	// MultipassNodeStateDeleted deleted state
+	MultipassNodeStateDeleted MultipassNodeState = 3
+
+	// MultipassNodeStateUndefined undefined state
+	MultipassNodeStateUndefined MultipassNodeState = 4
 )
 
-// Describe a multipass VM
-type multipassNode struct {
-	providerID       string
-	nodeName         string
-	memory           int
-	cpu              int
-	disk             int
-	address          []string
-	state            nodeState
-	autoprovisionned bool
+// MultipassNode Describe a multipass VM
+type MultipassNode struct {
+	ProviderID       string             `json:"providerID"`
+	NodeName         string             `json:"name"`
+	Memory           int                `json:"memory"`
+	CPU              int                `json:"cpu"`
+	Disk             int                `json:"disk"`
+	Addresses        []string           `json:"addresses"`
+	State            MultipassNodeState `json:"state"`
+	AutoProvisionned bool               `json:"auto"`
 }
 
 // VMDiskInfo describe VM disk usage
@@ -59,15 +70,15 @@ type VMMountInfos struct {
 
 // VMInfos describe VM global infos
 type VMInfos struct {
-	Disks        map[string]*VMDiskInfo `json:"disks"`
-	ImageHash    string                 `json:"image_hash"`
-	ImageRelease string                 `json:"image_release"`
-	Ipv4         []string               `json:"ipv4"`
-	Load         []float64              `json:"load"`
-	Memory       *VMMemoryInfo          `json:"memory"`
-	Mounts       map[string]string      `json:"mounts"`
-	Release      string                 `json:"release"`
-	State        string                 `json:"state"`
+	Disks        map[string]*VMDiskInfo  `json:"disks"`
+	ImageHash    string                  `json:"image_hash"`
+	ImageRelease string                  `json:"image_release"`
+	Ipv4         []string                `json:"ipv4"`
+	Load         []float64               `json:"load"`
+	Memory       *VMMemoryInfo           `json:"memory"`
+	Mounts       map[string]VMMountInfos `json:"mounts"`
+	Release      string                  `json:"release"`
+	State        string                  `json:"state"`
 }
 
 // MultipassVMInfos describe all about VMs
@@ -114,33 +125,37 @@ func shell(args ...string) error {
 	return nil
 }
 
-func (vm *multipassNode) prepareKubelet() error {
+func (vm *MultipassNode) prepareKubelet() error {
+	var out string
+	var err error
+	var fName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.NodeName)
+
 	kubeletDefault := []string{
+		"#!/bin/bash",
 		". /etc/default/kubelet",
-		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS='$KUBELET_EXTRA_ARGS --provider-id=%s'\" > /etc/default/kubelet", vm.providerID),
+		fmt.Sprintf("echo \"KUBELET_EXTRA_ARGS=\\\"$KUBELET_EXTRA_ARGS --provider-id=%s\\\"\" > /etc/default/kubelet", vm.ProviderID),
 		"systemctl restart kubelet",
 	}
 
-	args := []string{
-		"multipass",
-		"exec",
-		vm.nodeName,
-		"--",
-		"sudo",
-		"bash",
-		"-c",
-		strings.Join(kubeletDefault[:], ";"),
+	if err = ioutil.WriteFile(fName, []byte(strings.Join(kubeletDefault, "\n")), 0755); err != nil {
+		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
 	}
 
-	if err := shell(args...); err != nil {
-		return fmt.Errorf(errKubeletNotConfigured, vm.nodeName, err)
+	defer os.Remove(fName)
+
+	if out, err = pipe("multipass", "copy-files", fName, vm.NodeName+":"+fName); err != nil {
+		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
+	}
+
+	if out, err = pipe("multipass", "exec", vm.NodeName, "--", "sudo", "bash", fName); err != nil {
+		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
 	}
 
 	return nil
 }
 
-func (vm *multipassNode) waitReady(kubeconfig string) error {
-	glog.V(5).Infof("multipassNode::waitReady, node:%s", vm.nodeName)
+func (vm *MultipassNode) waitReady(kubeconfig string) error {
+	glog.V(5).Infof("multipassNode::waitReady, node:%s", vm.NodeName)
 
 	// Max 60s
 	for index := 0; index < 12; index++ {
@@ -150,7 +165,7 @@ func (vm *multipassNode) waitReady(kubeconfig string) error {
 			"kubectl",
 			"get",
 			"nodes",
-			vm.nodeName,
+			vm.NodeName,
 			"--output",
 			"json",
 			"--kubeconfig",
@@ -164,36 +179,35 @@ func (vm *multipassNode) waitReady(kubeconfig string) error {
 		var nodeInfo apiv1.Node
 
 		if err = json.Unmarshal([]byte(out), &nodeInfo); err != nil {
-			return fmt.Errorf(errUnmarshallingError, vm.nodeName, err)
+			return fmt.Errorf(errUnmarshallingError, vm.NodeName, err)
 		}
 
-		glog.V(5).Infof("multipassNode::waitReady, %v", nodeInfo)
+		//glog.V(5).Infof("multipassNode::waitReady, %v", nodeInfo)
 
 		for _, status := range nodeInfo.Status.Conditions {
 			if status.Type == "Ready" {
-				glog.V(5).Infof("multipassNode::waitReady, (%i) found Ready for %s", index, vm.nodeName)
 				if b, e := strconv.ParseBool(string(status.Status)); e == nil {
 					if b {
-						glog.V(5).Infof("multipassNode::waitReady, (%i) VM %s is Ready", index, vm.nodeName)
+						glog.V(5).Infof("multipassNode::waitReady, (%d) VM %s is Ready", index, vm.NodeName)
 						return nil
 					}
 				}
 			}
 		}
 
-		glog.V(5).Infof("multipassNode::waitReady, (%d) node:%s not ready", index, vm.nodeName)
+		glog.V(5).Infof("multipassNode::waitReady, (%d) node:%s not ready", index, vm.NodeName)
 
 		time.Sleep(5 * time.Second)
 	}
 
-	return fmt.Errorf(errNodeIsNotReady, vm.nodeName)
+	return fmt.Errorf(errNodeIsNotReady, vm.NodeName)
 }
 
-func (vm *multipassNode) kubeAdmJoin(extras *nodeCreationExtra) error {
+func (vm *MultipassNode) kubeAdmJoin(extras *nodeCreationExtra) error {
 	args := []string{
 		"multipass",
 		"exec",
-		vm.nodeName,
+		vm.NodeName,
 		"--",
 		"sudo",
 		"kubeadm",
@@ -211,20 +225,20 @@ func (vm *multipassNode) kubeAdmJoin(extras *nodeCreationExtra) error {
 	}
 
 	if err := shell(args...); err != nil {
-		return fmt.Errorf(errKubeAdmJoinFailed, vm.nodeName, err)
+		return fmt.Errorf(errKubeAdmJoinFailed, vm.NodeName, err)
 	}
 
 	return nil
 }
 
-func (vm *multipassNode) setNodeLabels(extras *nodeCreationExtra) error {
+func (vm *MultipassNode) setNodeLabels(extras *nodeCreationExtra) error {
 	if len(extras.nodeLabels)+len(extras.systemLabels) > 0 {
 
 		args := []string{
 			"kubectl",
 			"label",
 			"nodes",
-			vm.nodeName,
+			vm.NodeName,
 		}
 
 		// Append extras arguments
@@ -240,31 +254,46 @@ func (vm *multipassNode) setNodeLabels(extras *nodeCreationExtra) error {
 		args = append(args, extras.kubeConfig)
 
 		if err := shell(args...); err != nil {
-			return fmt.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+			return fmt.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 		}
+	}
+
+	args := []string{
+		"kubectl",
+		"annotate",
+		"node",
+		vm.NodeName,
+		fmt.Sprintf("%s=%s", nodeLabelGroupName, strconv.FormatBool(vm.AutoProvisionned)),
+		"--overwrite",
+		"--kubeconfig",
+		extras.kubeConfig,
+	}
+
+	if err := shell(args...); err != nil {
+		return fmt.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 	}
 
 	return nil
 }
 
-func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
-	glog.V(5).Infof("multipassNode::launchVM, node:%s", vm.nodeName)
+func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
+	glog.V(5).Infof("multipassNode::launchVM, node:%s", vm.NodeName)
 
 	var cloudInitFile *os.File
 	var err error
-	var status nodeState
+	var status MultipassNodeState
 
-	if vm.autoprovisionned == false {
-		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	if vm.AutoProvisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
-	if vm.state != nodeStateNotCreated {
-		err = fmt.Errorf(errVMAlreadyCreated, vm.nodeName)
+	if vm.State != MultipassNodeStateNotCreated {
+		err = fmt.Errorf(errVMAlreadyCreated, vm.NodeName)
 	} else {
 		if extras.cloudInit != nil && len(extras.cloudInit) > 0 {
 			var b []byte
 
-			fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.nodeName)
+			fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.NodeName)
 			cloudInitFile, err = os.Create(fName)
 			if err != nil {
 				glog.Errorf(errTempFile, err)
@@ -290,22 +319,22 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 			"multipass",
 			"launch",
 			"--name",
-			vm.nodeName,
+			vm.NodeName,
 		}
 
 		/*
 			Append VM attributes Memory,cpus, hard drive size....
 		*/
-		if vm.memory > 0 {
-			args = append(args, fmt.Sprintf("--mem=%dM", vm.memory))
+		if vm.Memory > 0 {
+			args = append(args, fmt.Sprintf("--mem=%dM", vm.Memory))
 		}
 
-		if vm.cpu > 0 {
-			args = append(args, fmt.Sprintf("--cpus=%d", vm.cpu))
+		if vm.CPU > 0 {
+			args = append(args, fmt.Sprintf("--cpus=%d", vm.CPU))
 		}
 
-		if vm.disk > 0 {
-			args = append(args, fmt.Sprintf("--disk=%dM", vm.disk))
+		if vm.Disk > 0 {
+			args = append(args, fmt.Sprintf("--disk=%dM", vm.Disk))
 		}
 
 		// If cloud-init file is present
@@ -320,21 +349,21 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 
 		// Launch the VM and wait until finish launched
 		if err = shell(args...); err != nil {
-			glog.Errorf(errUnableToLaunchVM, vm.nodeName, err)
+			glog.Errorf(errUnableToLaunchVM, vm.NodeName, err)
 		} else {
 
 			// Add mount point
 			if extras.mountPoints != nil && len(extras.mountPoints) > 0 {
 				for hostPath, guestPath := range extras.mountPoints {
-					if err = shell("multipass", "mount", hostPath, fmt.Sprintf("%s:%s", vm.nodeName, guestPath)); err != nil {
-						glog.Warningf(errUnableToMountPath, hostPath, guestPath, vm.nodeName, err)
+					if err = shell("multipass", "mount", hostPath, fmt.Sprintf("%s:%s", vm.NodeName, guestPath)); err != nil {
+						glog.Warningf(errUnableToMountPath, hostPath, guestPath, vm.NodeName, err)
 					}
 				}
 			}
 
 			if status, err = vm.statusVM(); err != nil {
 				glog.Error(err.Error())
-			} else if status == nodeStateRunning {
+			} else if status == MultipassNodeStateRunning {
 				// If the VM is running call kubeadm join
 				if extras.vmprovision {
 					if err = vm.prepareKubelet(); err == nil {
@@ -352,7 +381,7 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 					glog.Error(err.Error())
 				}
 			} else {
-				err = fmt.Errorf(errKubeAdmJoinNotRunning, vm.nodeName)
+				err = fmt.Errorf(errKubeAdmJoinNotRunning, vm.NodeName)
 			}
 		}
 	}
@@ -360,14 +389,14 @@ func (vm *multipassNode) launchVM(extras *nodeCreationExtra) error {
 	return err
 }
 
-func (vm *multipassNode) startVM(kubeconfig string) error {
-	glog.V(5).Infof("multipassNode::startVM, node:%s", vm.nodeName)
+func (vm *MultipassNode) startVM(kubeconfig string) error {
+	glog.V(5).Infof("multipassNode::startVM, node:%s", vm.NodeName)
 
 	var err error
-	var state nodeState
+	var state MultipassNodeState
 
-	if vm.autoprovisionned == false {
-		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	if vm.AutoProvisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
 	state, err = vm.statusVM()
@@ -376,41 +405,41 @@ func (vm *multipassNode) startVM(kubeconfig string) error {
 		return err
 	}
 
-	if state == nodeStateStopped {
-		if err = shell("multipass", "start", vm.nodeName); err != nil {
-			glog.Errorf(errStartVMFailed, vm.nodeName, err)
-			return fmt.Errorf(errStartVMFailed, vm.nodeName, err)
+	if state == MultipassNodeStateStopped {
+		if err = shell("multipass", "start", vm.NodeName); err != nil {
+			glog.Errorf(errStartVMFailed, vm.NodeName, err)
+			return fmt.Errorf(errStartVMFailed, vm.NodeName, err)
 		}
 
 		args := []string{
 			"kubectl",
 			"uncordon",
-			vm.nodeName,
+			vm.NodeName,
 			"--kubeconfig",
 			kubeconfig,
 		}
 
 		if err = shell(args...); err != nil {
-			glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+			glog.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 		}
 
-		vm.state = nodeStateRunning
-	} else if state != nodeStateRunning {
-		glog.Errorf(errVMNotFound, vm.nodeName)
-		return fmt.Errorf(errVMNotFound, vm.nodeName)
+		vm.State = MultipassNodeStateRunning
+	} else if state != MultipassNodeStateRunning {
+		glog.Errorf(errVMNotFound, vm.NodeName)
+		return fmt.Errorf(errVMNotFound, vm.NodeName)
 	}
 
 	return nil
 }
 
-func (vm *multipassNode) stopVM(kubeconfig string) error {
-	glog.V(5).Infof("multipassNode::stopVM, node:%s", vm.nodeName)
+func (vm *MultipassNode) stopVM(kubeconfig string) error {
+	glog.V(5).Infof("multipassNode::stopVM, node:%s", vm.NodeName)
 
 	var err error
-	var state nodeState
+	var state MultipassNodeState
 
-	if vm.autoprovisionned == false {
-		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	if vm.AutoProvisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
 	state, err = vm.statusVM()
@@ -419,41 +448,41 @@ func (vm *multipassNode) stopVM(kubeconfig string) error {
 		return err
 	}
 
-	if state == nodeStateRunning {
+	if state == MultipassNodeStateRunning {
 		args := []string{
 			"kubectl",
 			"cordon",
-			vm.nodeName,
+			vm.NodeName,
 			"--kubeconfig",
 			kubeconfig,
 		}
 
 		if err = shell(args...); err != nil {
-			glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+			glog.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 		}
 
-		if err = shell("multipass", "stop", vm.nodeName); err != nil {
-			glog.Errorf(errStopVMFailed, vm.nodeName, err)
-			return fmt.Errorf(errStopVMFailed, vm.nodeName, err)
+		if err = shell("multipass", "stop", vm.NodeName); err != nil {
+			glog.Errorf(errStopVMFailed, vm.NodeName, err)
+			return fmt.Errorf(errStopVMFailed, vm.NodeName, err)
 		}
 
-		vm.state = nodeStateStopped
-	} else if state != nodeStateStopped {
-		glog.Errorf(errVMNotFound, vm.nodeName)
-		return fmt.Errorf(errVMNotFound, vm.nodeName)
+		vm.State = MultipassNodeStateStopped
+	} else if state != MultipassNodeStateStopped {
+		glog.Errorf(errVMNotFound, vm.NodeName)
+		return fmt.Errorf(errVMNotFound, vm.NodeName)
 	}
 
 	return nil
 }
 
-func (vm *multipassNode) deleteVM(kubeconfig string) error {
-	glog.V(5).Infof("multipassNode::deleteVM, node:%s", vm.nodeName)
+func (vm *MultipassNode) deleteVM(kubeconfig string) error {
+	glog.V(5).Infof("multipassNode::deleteVM, node:%s", vm.NodeName)
 
 	var err error
-	var state nodeState
+	var state MultipassNodeState
 
-	if vm.autoprovisionned == false {
-		glog.Errorf(errVMNotProvisionnedByMe, vm.nodeName)
+	if vm.AutoProvisionned == false {
+		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
 	state, err = vm.statusVM()
@@ -465,7 +494,7 @@ func (vm *multipassNode) deleteVM(kubeconfig string) error {
 	args := []string{
 		"kubectl",
 		"drain",
-		vm.nodeName,
+		vm.NodeName,
 		"--delete-local-data",
 		"--force",
 		"--ignore-daemonsets",
@@ -474,73 +503,73 @@ func (vm *multipassNode) deleteVM(kubeconfig string) error {
 	}
 
 	if err = shell(args...); err != nil {
-		glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+		glog.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 	}
 
 	args = []string{
 		"kubectl",
 		"delete",
 		"node",
-		vm.nodeName,
+		vm.NodeName,
 		"--kubeconfig",
 		kubeconfig,
 	}
 
 	if err = shell(args...); err != nil {
-		glog.Errorf(errKubeCtlIgnoredError, vm.nodeName, err)
+		glog.Errorf(errKubeCtlIgnoredError, vm.NodeName, err)
 	}
 
-	if state == nodeStateRunning {
-		if err = shell("multipass", "stop", vm.nodeName); err != nil {
-			glog.Errorf(errStopVMFailed, vm.nodeName, err)
-			return fmt.Errorf(errStopVMFailed, vm.nodeName, err)
+	if state == MultipassNodeStateRunning {
+		if err = shell("multipass", "stop", vm.NodeName); err != nil {
+			glog.Errorf(errStopVMFailed, vm.NodeName, err)
+			return fmt.Errorf(errStopVMFailed, vm.NodeName, err)
 		}
 	}
 
-	if err = shell("multipass", "delete", "--purge", vm.nodeName); err != nil {
-		glog.Errorf(errDeleteVMFailed, vm.nodeName, err)
-		return fmt.Errorf(errDeleteVMFailed, vm.nodeName, err)
+	if err = shell("multipass", "delete", "--purge", vm.NodeName); err != nil {
+		glog.Errorf(errDeleteVMFailed, vm.NodeName, err)
+		return fmt.Errorf(errDeleteVMFailed, vm.NodeName, err)
 	}
 
-	vm.state = nodeStateDeleted
+	vm.State = MultipassNodeStateDeleted
 
 	return nil
 }
 
-func (vm *multipassNode) statusVM() (nodeState, error) {
-	glog.V(5).Infof("multipassNode::statusVM, node:%s", vm.nodeName)
+func (vm *MultipassNode) statusVM() (MultipassNodeState, error) {
+	glog.V(5).Infof("multipassNode::statusVM, node:%s", vm.NodeName)
 
 	// Get VM infos
 	var out string
 	var err error
 	var vmInfos MultipassVMInfos
 
-	if out, err = pipe("multipass", "info", vm.nodeName, "--format=json"); err != nil {
-		glog.Errorf(errGetVMInfoFailed, vm.nodeName, err)
-		return nodeStateUndefined, err
+	if out, err = pipe("multipass", "info", vm.NodeName, "--format=json"); err != nil {
+		glog.Errorf(errGetVMInfoFailed, vm.NodeName, err)
+		return MultipassNodeStateUndefined, err
 	}
 
 	if err = json.Unmarshal([]byte(out), &vmInfos); err != nil {
-		glog.Errorf(errGetVMInfoFailed, vm.nodeName, err)
-		return nodeStateUndefined, err
+		glog.Errorf(errGetVMInfoFailed, vm.NodeName, err)
+		return MultipassNodeStateUndefined, err
 	}
 
-	if vmInfo := vmInfos.Info[vm.nodeName]; vmInfo != nil {
-		vm.address = vmInfo.Ipv4
+	if vmInfo := vmInfos.Info[vm.NodeName]; vmInfo != nil {
+		vm.Addresses = vmInfo.Ipv4
 
 		switch vmInfo.State {
 		case "RUNNING":
-			vm.state = nodeStateRunning
+			vm.State = MultipassNodeStateRunning
 		case "STOPPED":
-			vm.state = nodeStateStopped
+			vm.State = MultipassNodeStateStopped
 		case "DELETED":
-			vm.state = nodeStateDeleted
+			vm.State = MultipassNodeStateDeleted
 		default:
-			vm.state = nodeStateUndefined
+			vm.State = MultipassNodeStateUndefined
 		}
 
-		return vm.state, nil
+		return vm.State, nil
 	}
 
-	return nodeStateUndefined, fmt.Errorf(errMultiPassInfoNotFound, vm.nodeName)
+	return MultipassNodeStateUndefined, fmt.Errorf(errMultiPassInfoNotFound, vm.NodeName)
 }

@@ -54,12 +54,18 @@
                             "--stderrthreshold=info",
                             "--cloud-provider=grpc",
                             "--cloud-config=/etc/cluster-autoscaler/grpc-config.conf",
-                            "--nodes=0:3:ca-grpc-multipass",
+                            "--nodes=0:3:true/ca-grpc-multipass",
                             "--max-nodes-total=3",
-                            "--cores-total=0:3",
-                            "--memory-total=12:24",
+                            "--cores-total=0:16",
+                            "--memory-total=2:24",
                             "--node-autoprovisioning-enabled",
-                            "--max-autoprovisioned-node-group-count=1"
+                            "--max-autoprovisioned-node-group-count=1",
+                            "--scale-down-enabled=true",
+                            "--scale-down-delay-after-add=1m",
+                            "--scale-down-delay-after-delete=1m",
+                            "--scale-down-delay-after-failure=1m",
+                            "--scale-down-unneeded-time=1m",
+                            "--scale-down-unready-time=1m"
                         ],
                         "imagePullPolicy": "Always",
                         "volumeMounts": [

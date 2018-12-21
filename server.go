@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	apigrpc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
@@ -10,9 +12,16 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 )
 
-type resourceLimiter struct {
-	minLimits map[string]int64
-	maxLimits map[string]int64
+const (
+	nodeLabelGroupName             = "cluster.autoscaler.nodegroup/name"
+	annotationNodeAutoProvisionned = "cluster.autoscaler.nodegroup/autoprovision"
+	annotationScaleDownDisabled    = "cluster-autoscaler.kubernetes.io/scale-down-disabled"
+)
+
+// ResourceLimiter define limit, not really used
+type ResourceLimiter struct {
+	MinLimits map[string]int64 `json:"min"`
+	MaxLimits map[string]int64 `json:"max"`
 }
 
 // MachineCharacteristic defines VM kind
@@ -61,27 +70,27 @@ type MultipassServerConfig struct {
 
 // MultipassServer declare multipass grpc server
 type MultipassServer struct {
-	resourceLimiter *resourceLimiter
-	nodeGroups      map[string]*multipassNodeGroup
-	config          MultipassServerConfig
-	kubeAdmConfig   *apigrpc.KubeAdmConfig
-	nodes           []*apigrpc.NodeGroupDef
-	autoProvision   bool
+	ResourceLimiter      *ResourceLimiter               `json:"limits"`
+	Groups               map[string]*MultipassNodeGroup `json:"groups"`
+	Configuration        MultipassServerConfig          `json:"config"`
+	KubeAdmConfiguration *apigrpc.KubeAdmConfig         `json:"kubeadm"`
+	NodesDefinition      []*apigrpc.NodeGroupDef        `json:"nodedefs"`
+	AutoProvision        bool                           `json:"auto"`
 }
 
 func (s *MultipassServer) generateNodeGroupName() string {
 	return fmt.Sprintf("ng-%d", time.Now().Unix())
 }
 
-func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string, autoProvision bool) (*multipassNodeGroup, error) {
+func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string, autoProvision bool) (*MultipassNodeGroup, error) {
 
-	machine := s.config.Machines[machineType]
+	machine := s.Configuration.Machines[machineType]
 
 	if machine == nil {
 		return nil, fmt.Errorf(errMachineTypeNotFound, machineType)
 	}
 
-	if nodeGroup := s.nodeGroups[nodeGroupID]; nodeGroup != nil {
+	if nodeGroup := s.Groups[nodeGroupID]; nodeGroup != nil {
 		glog.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
 
 		return nil, fmt.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
@@ -89,27 +98,27 @@ func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeS
 
 	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node lables:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
 
-	nodeGroup := &multipassNodeGroup{
-		cloudProviderID: s.config.ProviderID,
-		identifier:      nodeGroupID,
-		machine:         machine,
-		status:          nodegroupNotCreated,
-		pendingNodes:    make(map[string]*multipassNode),
-		nodes:           make(map[string]*multipassNode),
-		minSize:         int(minNodeSize),
-		maxSize:         int(maxNodeSize),
-		nodeLabels:      labels,
-		systemLabels:    systemLabels,
-		autoProvision:   autoProvision,
+	nodeGroup := &MultipassNodeGroup{
+		ServiceIdentifier:   s.Configuration.ProviderID,
+		NodeGroupIdentifier: nodeGroupID,
+		Machine:             machine,
+		Status:              NodegroupNotCreated,
+		PendingNodes:        make(map[string]*MultipassNode),
+		Nodes:               make(map[string]*MultipassNode),
+		MinNodeSize:         int(minNodeSize),
+		MaxNodeSize:         int(maxNodeSize),
+		NodeLabels:          labels,
+		SystemLabels:        systemLabels,
+		AutoProvision:       autoProvision,
 	}
 
-	s.nodeGroups[nodeGroupID] = nodeGroup
+	s.Groups[nodeGroupID] = nodeGroup
 
 	return nodeGroup, nil
 }
 
 func (s *MultipassServer) deleteNodeGroup(nodeGroupID string) error {
-	nodeGroup := s.nodeGroups[nodeGroupID]
+	nodeGroup := s.Groups[nodeGroupID]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, nodeGroupID)
@@ -118,52 +127,52 @@ func (s *MultipassServer) deleteNodeGroup(nodeGroupID string) error {
 
 	glog.Infof("Delete node group, ID:%s", nodeGroupID)
 
-	if err := nodeGroup.deleteNodeGroup(s.config.KubeCtlConfig); err != nil {
+	if err := nodeGroup.deleteNodeGroup(s.Configuration.KubeCtlConfig); err != nil {
 		glog.Errorf(errUnableToDeleteNodeGroup, nodeGroupID, err)
 		return err
 	}
 
-	delete(s.nodeGroups, nodeGroupID)
+	delete(s.Groups, nodeGroupID)
 
 	return nil
 }
 
-func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGroup, error) {
-	nodeGroup := s.nodeGroups[nodeGroupID]
+func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*MultipassNodeGroup, error) {
+	nodeGroup := s.Groups[nodeGroupID]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, nodeGroupID)
 		return nil, fmt.Errorf(errNodeGroupNotFound, nodeGroupID)
 	}
 
-	if nodeGroup.status == nodegroupNotCreated {
+	if nodeGroup.Status == NodegroupNotCreated {
 		// Must launch minNode VM
-		if nodeGroup.minSize > 0 {
+		if nodeGroup.MinNodeSize > 0 {
 
 			glog.Infof("Create node group, ID:%s", nodeGroupID)
 
 			extras := &nodeCreationExtra{
-				kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
-				kubeToken:     s.kubeAdmConfig.KubeAdmToken,
-				kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
-				kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
-				kubeConfig:    s.config.KubeCtlConfig,
-				image:         s.config.Image,
-				cloudInit:     s.config.CloudInit,
-				mountPoints:   s.config.MountPoints,
-				nodeLabels:    nodeGroup.nodeLabels,
-				systemLabels:  nodeGroup.systemLabels,
-				vmprovision:   s.config.VMProvision,
+				kubeHost:      s.KubeAdmConfiguration.KubeAdmAddress,
+				kubeToken:     s.KubeAdmConfiguration.KubeAdmToken,
+				kubeCACert:    s.KubeAdmConfiguration.KubeAdmCACert,
+				kubeExtraArgs: s.KubeAdmConfiguration.KubeAdmExtraArguments,
+				kubeConfig:    s.Configuration.KubeCtlConfig,
+				image:         s.Configuration.Image,
+				cloudInit:     s.Configuration.CloudInit,
+				mountPoints:   s.Configuration.MountPoints,
+				nodeLabels:    nodeGroup.NodeLabels,
+				systemLabels:  nodeGroup.SystemLabels,
+				vmprovision:   s.Configuration.VMProvision,
 			}
 
-			if err := nodeGroup.addNodes(nodeGroup.minSize, extras); err != nil {
+			if err := nodeGroup.addNodes(nodeGroup.MinNodeSize, extras); err != nil {
 				glog.Errorf(err.Error())
 
 				return nil, err
 			}
 		}
 
-		nodeGroup.status = nodegroupCreated
+		nodeGroup.Status = NodegroupCreated
 	}
 
 	return nodeGroup, nil
@@ -172,31 +181,42 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*multipassNodeGro
 func (s *MultipassServer) doAutoProvision() error {
 	glog.V(2).Info("Call server doAutoProvision")
 
-	var ng *multipassNodeGroup
+	var ng *MultipassNodeGroup
 	var err error
 
-	for _, node := range s.nodes {
-		labels := make(map[string]string)
-		systemLabels := make(map[string]string)
+	for _, node := range s.NodesDefinition {
 		nodeGroupIdentifier := node.GetNodeGroupID()
 
 		if len(nodeGroupIdentifier) > 0 {
+			ng = s.Groups[nodeGroupIdentifier]
 
-			if s.nodeGroups[nodeGroupIdentifier] == nil {
+			if ng == nil {
+				systemLabels := make(map[string]string)
+				labels := map[string]string{
+					nodeLabelGroupName: nodeGroupIdentifier,
+				}
+
 				glog.V(2).Info("Do auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, node.MinSize, node.MaxSize)
 
-				labels["cluster.autoscaler.nodegroup/name"] = nodeGroupIdentifier
-
-				if _, err = s.newNodeGroup(nodeGroupIdentifier, node.MinSize, node.MaxSize, s.config.DefaultMachineType, labels, systemLabels, true); err == nil {
+				if ng, err = s.newNodeGroup(nodeGroupIdentifier, node.MinSize, node.MaxSize, s.Configuration.DefaultMachineType, labels, systemLabels, true); err == nil {
 					if ng, err = s.createNodeGroup(nodeGroupIdentifier); err == nil {
-						if err = ng.autoDiscoveryNodes(s.config.KubeCtlConfig); err == nil {
-							return err
+						if node.GetIncludeExistingNode() {
+							if err = ng.autoDiscoveryNodes(true, s.Configuration.KubeCtlConfig); err == nil {
+								return err
+							}
 						}
 					}
 				}
 
 				if err != nil {
 					break
+				}
+			} else {
+				// If the nodegroup already exists, reparse nodes
+				if node.GetIncludeExistingNode() {
+					if err = ng.autoDiscoveryNodes(true, s.Configuration.KubeCtlConfig); err == nil {
+						return err
+					}
 				}
 			}
 		}
@@ -209,31 +229,31 @@ func (s *MultipassServer) doAutoProvision() error {
 func (s *MultipassServer) Connect(ctx context.Context, request *apigrpc.ConnectRequest) (*apigrpc.ConnectReply, error) {
 	glog.V(2).Infof("Call server Connect: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
 	if request.GetResourceLimiter() != nil {
-		s.resourceLimiter = &resourceLimiter{
-			minLimits: request.ResourceLimiter.MinLimits,
-			maxLimits: request.ResourceLimiter.MaxLimits,
+		s.ResourceLimiter = &ResourceLimiter{
+			MinLimits: request.ResourceLimiter.MinLimits,
+			MaxLimits: request.ResourceLimiter.MaxLimits,
 		}
 	}
 
-	s.nodes = request.GetNodes()
-	s.autoProvision = request.GetAutoProvisionned()
+	s.NodesDefinition = request.GetNodes()
+	s.AutoProvision = request.GetAutoProvisionned()
 
-	if s.autoProvision {
+	if request.GetKubeAdmConfiguration() != nil {
+		s.KubeAdmConfiguration = request.GetKubeAdmConfiguration()
+	}
+
+	if s.AutoProvision {
 		if err := s.doAutoProvision(); err != nil {
 			glog.Errorf(errUnableToAutoProvisionNodeGroup, err)
 
 			return nil, err
 		}
-	}
-
-	if request.GetKubeAdmConfiguration() != nil {
-		s.kubeAdmConfig = request.GetKubeAdmConfiguration()
 	}
 
 	return &apigrpc.ConnectReply{
@@ -247,7 +267,7 @@ func (s *MultipassServer) Connect(ctx context.Context, request *apigrpc.ConnectR
 func (s *MultipassServer) Name(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.NameReply, error) {
 	glog.V(2).Infof("Call server Name: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -261,16 +281,16 @@ func (s *MultipassServer) Name(ctx context.Context, request *apigrpc.CloudProvid
 func (s *MultipassServer) NodeGroups(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.NodeGroupsReply, error) {
 	glog.V(2).Infof("Call server NodeGroups: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroups := make([]*apigrpc.NodeGroup, 0, len(s.nodeGroups))
+	nodeGroups := make([]*apigrpc.NodeGroup, 0, len(s.Groups))
 
-	for name, nodeGroup := range s.nodeGroups {
+	for name, nodeGroup := range s.Groups {
 		// Return node group if created
-		if nodeGroup.status == nodegroupCreated {
+		if nodeGroup.Status == NodegroupCreated {
 			nodeGroups = append(nodeGroups, &apigrpc.NodeGroup{
 				Id: name,
 			})
@@ -282,8 +302,8 @@ func (s *MultipassServer) NodeGroups(ctx context.Context, request *apigrpc.Cloud
 	}, nil
 }
 
-func (s *MultipassServer) nodeGroupForNode(providerID string) (*multipassNodeGroup, error) {
-	nodeGroupID, err := nodeGroupIDFromProviderID(s.config.ProviderID, providerID)
+func (s *MultipassServer) nodeGroupForNode(providerID string) (*MultipassNodeGroup, error) {
+	nodeGroupID, err := nodeGroupIDFromProviderID(s.Configuration.ProviderID, providerID)
 
 	if err != nil {
 		glog.Errorf(errCantDecodeNodeIDWithReason, providerID, err)
@@ -297,7 +317,7 @@ func (s *MultipassServer) nodeGroupForNode(providerID string) (*multipassNodeGro
 		return nil, fmt.Errorf(errCantDecodeNodeID, providerID)
 	}
 
-	nodeGroup := s.nodeGroups[nodeGroupID]
+	nodeGroup := s.Groups[nodeGroupID]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupForNodeNotFound, nodeGroupID, providerID)
@@ -314,7 +334,7 @@ func (s *MultipassServer) nodeGroupForNode(providerID string) (*multipassNodeGro
 func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc.NodeGroupForNodeRequest) (*apigrpc.NodeGroupForNodeReply, error) {
 	glog.V(2).Infof("Call server NodeGroupForNode: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -334,7 +354,10 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 		}, nil
 	}
 
-	if len(node.Spec.ProviderID) == 0 {
+	providerID := getNodeProviderID(s.Configuration.ProviderID, node)
+
+	if len(providerID) == 0 {
+		glog.V(2).Info("node.Spec.ProviderID is empty")
 		return &apigrpc.NodeGroupForNodeReply{
 			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
 				NodeGroup: &apigrpc.NodeGroup{},
@@ -342,7 +365,7 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 		}, nil
 	}
 
-	nodeGroup, err := s.nodeGroupForNode(node.Spec.ProviderID)
+	nodeGroup, err := s.nodeGroupForNode(providerID)
 
 	if err != nil {
 		return &apigrpc.NodeGroupForNodeReply{
@@ -356,6 +379,8 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 	}
 
 	if nodeGroup == nil {
+		glog.V(2).Infof("Nodegroup not found for node.Spec.ProviderID:%s", providerID)
+
 		return &apigrpc.NodeGroupForNodeReply{
 			Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
 				NodeGroup: &apigrpc.NodeGroup{},
@@ -366,7 +391,7 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 	return &apigrpc.NodeGroupForNodeReply{
 		Response: &apigrpc.NodeGroupForNodeReply_NodeGroup{
 			NodeGroup: &apigrpc.NodeGroup{
-				Id: nodeGroup.identifier,
+				Id: nodeGroup.NodeGroupIdentifier,
 			},
 		},
 	}, nil
@@ -377,11 +402,11 @@ func (s *MultipassServer) NodeGroupForNode(ctx context.Context, request *apigrpc
 func (s *MultipassServer) Pricing(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.PricingModelReply, error) {
 	glog.V(2).Infof("Call server Pricing: %v", request)
 
-	if s.config.Optionals.Pricing {
+	if s.Configuration.Optionals.Pricing {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -389,7 +414,7 @@ func (s *MultipassServer) Pricing(ctx context.Context, request *apigrpc.CloudPro
 	return &apigrpc.PricingModelReply{
 		Response: &apigrpc.PricingModelReply_PriceModel{
 			PriceModel: &apigrpc.PricingModel{
-				Id: s.config.ProviderID,
+				Id: s.Configuration.ProviderID,
 			},
 		},
 	}, nil
@@ -400,18 +425,18 @@ func (s *MultipassServer) Pricing(ctx context.Context, request *apigrpc.CloudPro
 func (s *MultipassServer) GetAvailableMachineTypes(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.AvailableMachineTypesReply, error) {
 	glog.V(2).Infof("Call server GetAvailableMachineTypes: %v", request)
 
-	if s.config.Optionals.GetAvailableMachineTypes {
+	if s.Configuration.Optionals.GetAvailableMachineTypes {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	machineTypes := make([]string, 0, len(s.config.Machines))
+	machineTypes := make([]string, 0, len(s.Configuration.Machines))
 
-	for n := range s.config.Machines {
+	for n := range s.Configuration.Machines {
 		machineTypes = append(machineTypes, n)
 	}
 
@@ -430,16 +455,16 @@ func (s *MultipassServer) GetAvailableMachineTypes(ctx context.Context, request 
 func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.NewNodeGroupRequest) (*apigrpc.NewNodeGroupReply, error) {
 	glog.V(2).Infof("Call server NewNodeGroup: %v", request)
 
-	if s.config.Optionals.NewNodeGroup {
+	if s.Configuration.Optionals.NewNodeGroup {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	machineType := s.config.Machines[request.GetMachineType()]
+	machineType := s.Configuration.Machines[request.GetMachineType()]
 
 	if machineType == nil {
 		glog.Errorf(errMachineTypeNotFound, request.GetMachineType())
@@ -477,7 +502,7 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 		nodeGroupIdentifier = request.GetNodeGroupID()
 	}
 
-	labels["cluster.autoscaler.nodegroup/name"] = nodeGroupIdentifier
+	labels[nodeLabelGroupName] = nodeGroupIdentifier
 
 	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMinNodeSize(), request.GetMaxNodeSize(), request.GetMachineType(), labels, systemLabels, false)
 
@@ -497,7 +522,7 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 	return &apigrpc.NewNodeGroupReply{
 		Response: &apigrpc.NewNodeGroupReply_NodeGroup{
 			NodeGroup: &apigrpc.NodeGroup{
-				Id: nodeGroup.identifier,
+				Id: nodeGroup.NodeGroupIdentifier,
 			},
 		},
 	}, nil
@@ -507,7 +532,7 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 func (s *MultipassServer) GetResourceLimiter(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.ResourceLimiterReply, error) {
 	glog.V(2).Infof("Call server GetResourceLimiter: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -515,8 +540,8 @@ func (s *MultipassServer) GetResourceLimiter(ctx context.Context, request *apigr
 	return &apigrpc.ResourceLimiterReply{
 		Response: &apigrpc.ResourceLimiterReply_ResourceLimiter{
 			ResourceLimiter: &apigrpc.ResourceLimiter{
-				MinLimits: s.resourceLimiter.minLimits,
-				MaxLimits: s.resourceLimiter.maxLimits,
+				MinLimits: s.ResourceLimiter.MinLimits,
+				MaxLimits: s.ResourceLimiter.MaxLimits,
 			},
 		},
 	}, nil
@@ -528,13 +553,13 @@ func (s *MultipassServer) Cleanup(ctx context.Context, request *apigrpc.CloudPro
 
 	var lastError *apigrpc.Error
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	for _, nodeGroup := range s.nodeGroups {
-		if err := nodeGroup.cleanup(s.config.KubeCtlConfig); err != nil {
+	for _, nodeGroup := range s.Groups {
+		if err := nodeGroup.cleanup(s.Configuration.KubeCtlConfig); err != nil {
 			lastError = &apigrpc.Error{
 				Code:   cloudProviderError,
 				Reason: err.Error(),
@@ -544,7 +569,7 @@ func (s *MultipassServer) Cleanup(ctx context.Context, request *apigrpc.CloudPro
 
 	glog.V(5).Info("Leave server Cleanup, done")
 
-	s.nodeGroups = make(map[string]*multipassNodeGroup)
+	s.Groups = make(map[string]*MultipassNodeGroup)
 
 	return &apigrpc.CleanupReply{
 		Error: lastError,
@@ -556,13 +581,19 @@ func (s *MultipassServer) Cleanup(ctx context.Context, request *apigrpc.CloudPro
 func (s *MultipassServer) Refresh(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.RefreshReply, error) {
 	glog.V(2).Infof("Call server Refresh: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	for _, ng := range s.nodeGroups {
+	for _, ng := range s.Groups {
 		ng.refresh()
+	}
+
+	if phSaveState {
+		if err := s.save(phSavedState); err != nil {
+			glog.Errorf(errFailedToSaveServerState, err)
+		}
 	}
 
 	return &apigrpc.RefreshReply{
@@ -576,17 +607,17 @@ func (s *MultipassServer) MaxSize(ctx context.Context, request *apigrpc.NodeGrou
 
 	var maxSize int
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
 	} else {
-		maxSize = nodeGroup.maxSize
+		maxSize = nodeGroup.MaxNodeSize
 	}
 
 	return &apigrpc.MaxSizeReply{
@@ -600,16 +631,16 @@ func (s *MultipassServer) MinSize(ctx context.Context, request *apigrpc.NodeGrou
 
 	var minSize int
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
 	} else {
-		minSize = nodeGroup.minSize
+		minSize = nodeGroup.MinNodeSize
 	}
 
 	return &apigrpc.MinSizeReply{
@@ -624,12 +655,12 @@ func (s *MultipassServer) MinSize(ctx context.Context, request *apigrpc.NodeGrou
 func (s *MultipassServer) TargetSize(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.TargetSizeReply, error) {
 	glog.V(2).Infof("Call server TargetSize: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -657,12 +688,12 @@ func (s *MultipassServer) TargetSize(ctx context.Context, request *apigrpc.NodeG
 func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.IncreaseSizeRequest) (*apigrpc.IncreaseSizeReply, error) {
 	glog.V(2).Infof("Call server IncreaseSize: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -686,31 +717,31 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 		}, nil
 	}
 
-	newSize := len(nodeGroup.nodes) + int(request.GetDelta())
+	newSize := len(nodeGroup.Nodes) + int(request.GetDelta())
 
-	if newSize > nodeGroup.maxSize {
-		glog.Errorf(errIncreaseSizeTooLarge, newSize, nodeGroup.maxSize)
+	if newSize > nodeGroup.MaxNodeSize {
+		glog.Errorf(errIncreaseSizeTooLarge, newSize, nodeGroup.MaxNodeSize)
 
 		return &apigrpc.IncreaseSizeReply{
 			Error: &apigrpc.Error{
 				Code:   cloudProviderError,
-				Reason: fmt.Sprintf(errIncreaseSizeTooLarge, newSize, nodeGroup.maxSize),
+				Reason: fmt.Sprintf(errIncreaseSizeTooLarge, newSize, nodeGroup.MaxNodeSize),
 			},
 		}, nil
 	}
 
 	extras := &nodeCreationExtra{
-		kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
-		kubeToken:     s.kubeAdmConfig.KubeAdmToken,
-		kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
-		kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
-		kubeConfig:    s.config.KubeCtlConfig,
-		image:         s.config.Image,
-		cloudInit:     s.config.CloudInit,
-		mountPoints:   s.config.MountPoints,
-		nodeLabels:    nodeGroup.nodeLabels,
-		systemLabels:  nodeGroup.systemLabels,
-		vmprovision:   s.config.VMProvision,
+		kubeHost:      s.KubeAdmConfiguration.KubeAdmAddress,
+		kubeToken:     s.KubeAdmConfiguration.KubeAdmToken,
+		kubeCACert:    s.KubeAdmConfiguration.KubeAdmCACert,
+		kubeExtraArgs: s.KubeAdmConfiguration.KubeAdmExtraArguments,
+		kubeConfig:    s.Configuration.KubeCtlConfig,
+		image:         s.Configuration.Image,
+		cloudInit:     s.Configuration.CloudInit,
+		mountPoints:   s.Configuration.MountPoints,
+		nodeLabels:    nodeGroup.NodeLabels,
+		systemLabels:  nodeGroup.SystemLabels,
+		vmprovision:   s.Configuration.VMProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -735,12 +766,12 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.DeleteNodesRequest) (*apigrpc.DeleteNodesReply, error) {
 	glog.V(2).Infof("Call server DeleteNodes: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -753,7 +784,7 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		}, nil
 	}
 
-	if nodeGroup.targetSize()-len(request.GetNode()) < nodeGroup.minSize {
+	if nodeGroup.targetSize()-len(request.GetNode()) < nodeGroup.MinNodeSize {
 		return &apigrpc.DeleteNodesReply{
 			Error: &apigrpc.Error{
 				Code:   cloudProviderError,
@@ -779,7 +810,7 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		}
 
 		// Check node group owner
-		nodeName := node.Spec.ProviderID
+		nodeName := getNodeProviderID(s.Configuration.ProviderID, node)
 		nodeGroupForNode, err := s.nodeGroupForNode(nodeName)
 
 		// Node group not found
@@ -795,19 +826,19 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 		}
 
 		// Not in the same group
-		if nodeGroupForNode.identifier != nodeGroup.identifier {
+		if nodeGroupForNode.NodeGroupIdentifier != nodeGroup.NodeGroupIdentifier {
 			return &apigrpc.DeleteNodesReply{
 				Error: &apigrpc.Error{
 					Code:   cloudProviderError,
-					Reason: fmt.Sprintf(errUnableToDeleteNode, nodeName, nodeGroup.identifier),
+					Reason: fmt.Sprintf(errUnableToDeleteNode, nodeName, nodeGroup.NodeGroupIdentifier),
 				},
 			}, nil
 		}
 
 		// Delete the node in the group
-		nodeName, err = nodeNameFromProviderID(s.config.ProviderID, nodeName)
+		nodeName, err = nodeNameFromProviderID(s.Configuration.ProviderID, nodeName)
 
-		err = nodeGroup.deleteNodeByName(s.config.KubeCtlConfig, nodeName)
+		err = nodeGroup.deleteNodeByName(s.Configuration.KubeCtlConfig, nodeName)
 
 		if err != nil {
 			return &apigrpc.DeleteNodesReply{
@@ -832,12 +863,12 @@ func (s *MultipassServer) DeleteNodes(ctx context.Context, request *apigrpc.Dele
 func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigrpc.DecreaseTargetSizeRequest) (*apigrpc.DecreaseTargetSizeReply, error) {
 	glog.V(2).Infof("Call server DecreaseTargetSize: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -863,7 +894,7 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 
 	newSize := nodeGroup.targetSize() + int(request.GetDelta())
 
-	if newSize < len(nodeGroup.nodes) {
+	if newSize < len(nodeGroup.Nodes) {
 		glog.Errorf(errDecreaseSizeAttemptDeleteNodes, nodeGroup.targetSize(), request.GetDelta(), newSize)
 
 		return &apigrpc.DecreaseTargetSizeReply{
@@ -875,17 +906,17 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 	}
 
 	extras := &nodeCreationExtra{
-		kubeHost:      s.kubeAdmConfig.KubeAdmAddress,
-		kubeToken:     s.kubeAdmConfig.KubeAdmToken,
-		kubeCACert:    s.kubeAdmConfig.KubeAdmCACert,
-		kubeExtraArgs: s.kubeAdmConfig.KubeAdmExtraArguments,
-		kubeConfig:    s.config.KubeCtlConfig,
-		image:         s.config.Image,
-		cloudInit:     s.config.CloudInit,
-		mountPoints:   s.config.MountPoints,
-		nodeLabels:    nodeGroup.nodeLabels,
-		systemLabels:  nodeGroup.systemLabels,
-		vmprovision:   s.config.VMProvision,
+		kubeHost:      s.KubeAdmConfiguration.KubeAdmAddress,
+		kubeToken:     s.KubeAdmConfiguration.KubeAdmToken,
+		kubeCACert:    s.KubeAdmConfiguration.KubeAdmCACert,
+		kubeExtraArgs: s.KubeAdmConfiguration.KubeAdmExtraArguments,
+		kubeConfig:    s.Configuration.KubeCtlConfig,
+		image:         s.Configuration.Image,
+		cloudInit:     s.Configuration.CloudInit,
+		mountPoints:   s.Configuration.MountPoints,
+		nodeLabels:    nodeGroup.NodeLabels,
+		systemLabels:  nodeGroup.SystemLabels,
+		vmprovision:   s.Configuration.VMProvision,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -908,12 +939,12 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 func (s *MultipassServer) Id(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.IdReply, error) {
 	glog.V(2).Infof("Call server Id: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -922,7 +953,7 @@ func (s *MultipassServer) Id(ctx context.Context, request *apigrpc.NodeGroupServ
 	}
 
 	return &apigrpc.IdReply{
-		Response: nodeGroup.identifier,
+		Response: nodeGroup.NodeGroupIdentifier,
 	}, nil
 }
 
@@ -930,12 +961,12 @@ func (s *MultipassServer) Id(ctx context.Context, request *apigrpc.NodeGroupServ
 func (s *MultipassServer) Debug(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.DebugReply, error) {
 	glog.V(2).Infof("Call server Debug: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -944,7 +975,7 @@ func (s *MultipassServer) Debug(ctx context.Context, request *apigrpc.NodeGroupS
 	}
 
 	return &apigrpc.DebugReply{
-		Response: fmt.Sprintf("%s-%s", request.GetProviderID(), nodeGroup.identifier),
+		Response: fmt.Sprintf("%s-%s", request.GetProviderID(), nodeGroup.NodeGroupIdentifier),
 	}, nil
 }
 
@@ -954,12 +985,12 @@ func (s *MultipassServer) Debug(ctx context.Context, request *apigrpc.NodeGroupS
 func (s *MultipassServer) Nodes(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.NodesReply, error) {
 	glog.V(2).Infof("Call server Nodes: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -974,13 +1005,13 @@ func (s *MultipassServer) Nodes(ctx context.Context, request *apigrpc.NodeGroupS
 		}, nil
 	}
 
-	instances := make([]*apigrpc.Instance, 0, len(nodeGroup.nodes))
+	instances := make([]*apigrpc.Instance, 0, len(nodeGroup.Nodes))
 
-	for nodeName, node := range nodeGroup.nodes {
+	for nodeName, node := range nodeGroup.Nodes {
 		instances = append(instances, &apigrpc.Instance{
 			Id: nodeGroup.providerIDForNode(nodeName),
 			Status: &apigrpc.InstanceStatus{
-				State:     apigrpc.InstanceState(node.state),
+				State:     apigrpc.InstanceState(node.State),
 				ErrorInfo: nil,
 			},
 		})
@@ -1004,16 +1035,16 @@ func (s *MultipassServer) Nodes(ctx context.Context, request *apigrpc.NodeGroupS
 func (s *MultipassServer) TemplateNodeInfo(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.TemplateNodeInfoReply, error) {
 	glog.V(2).Infof("Call server TemplateNodeInfo: %v", request)
 
-	if s.config.Optionals.TemplateNodeInfo {
+	if s.Configuration.Optionals.TemplateNodeInfo {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	if nodeGroup == nil {
 		glog.Errorf(errNodeGroupNotFound, request.GetNodeGroupID())
@@ -1047,12 +1078,12 @@ func (s *MultipassServer) TemplateNodeInfo(ctx context.Context, request *apigrpc
 func (s *MultipassServer) Exist(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.ExistReply, error) {
 	glog.V(2).Infof("Call server Exist: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	nodeGroup := s.nodeGroups[request.GetNodeGroupID()]
+	nodeGroup := s.Groups[request.GetNodeGroupID()]
 
 	return &apigrpc.ExistReply{
 		Exists: nodeGroup != nil,
@@ -1063,11 +1094,11 @@ func (s *MultipassServer) Exist(ctx context.Context, request *apigrpc.NodeGroupS
 func (s *MultipassServer) Create(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.CreateReply, error) {
 	glog.V(2).Infof("Call server Create: %v", request)
 
-	if s.config.Optionals.Create {
+	if s.Configuration.Optionals.Create {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -1090,7 +1121,7 @@ func (s *MultipassServer) Create(ctx context.Context, request *apigrpc.NodeGroup
 	return &apigrpc.CreateReply{
 		Response: &apigrpc.CreateReply_NodeGroup{
 			NodeGroup: &apigrpc.NodeGroup{
-				Id: nodeGroup.identifier,
+				Id: nodeGroup.NodeGroupIdentifier,
 			},
 		},
 	}, nil
@@ -1102,11 +1133,11 @@ func (s *MultipassServer) Create(ctx context.Context, request *apigrpc.NodeGroup
 func (s *MultipassServer) Delete(ctx context.Context, request *apigrpc.NodeGroupServiceRequest) (*apigrpc.DeleteReply, error) {
 	glog.V(2).Infof("Call server Delete: %v", request)
 
-	if s.config.Optionals.Delete {
+	if s.Configuration.Optionals.Delete {
 		return nil, fmt.Errorf(errNotImplemented)
 	}
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -1135,15 +1166,15 @@ func (s *MultipassServer) Autoprovisioned(ctx context.Context, request *apigrpc.
 
 	var b bool
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
-	ng := s.nodeGroups[request.GetNodeGroupID()]
+	ng := s.Groups[request.GetNodeGroupID()]
 
 	if ng != nil {
-		b = ng.autoProvision
+		b = ng.AutoProvision
 	}
 
 	return &apigrpc.AutoprovisionedReply{
@@ -1155,7 +1186,7 @@ func (s *MultipassServer) Autoprovisioned(ctx context.Context, request *apigrpc.
 func (s *MultipassServer) Belongs(ctx context.Context, request *apigrpc.BelongsRequest) (*apigrpc.BelongsReply, error) {
 	glog.V(2).Infof("Call server Belongs: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
@@ -1175,13 +1206,14 @@ func (s *MultipassServer) Belongs(ctx context.Context, request *apigrpc.BelongsR
 		}, nil
 	}
 
-	nodeGroup, err := s.nodeGroupForNode(node.Spec.ProviderID)
+	providerID := getNodeProviderID(s.Configuration.ProviderID, node)
+	nodeGroup, err := s.nodeGroupForNode(providerID)
 
 	var belong bool
 
 	if nodeGroup != nil {
-		if nodeGroup.identifier == request.GetNodeGroupID() {
-			nodeName, err := nodeNameFromProviderID(s.config.ProviderID, node.Spec.ProviderID)
+		if nodeGroup.NodeGroupIdentifier == request.GetNodeGroupID() {
+			nodeName, err := nodeNameFromProviderID(s.Configuration.ProviderID, providerID)
 
 			if err != nil {
 				return &apigrpc.BelongsReply{
@@ -1194,7 +1226,7 @@ func (s *MultipassServer) Belongs(ctx context.Context, request *apigrpc.BelongsR
 				}, nil
 			}
 
-			belong = nodeGroup.nodes[nodeName] != nil
+			belong = nodeGroup.Nodes[nodeName] != nil
 		}
 	}
 
@@ -1210,14 +1242,14 @@ func (s *MultipassServer) Belongs(ctx context.Context, request *apigrpc.BelongsR
 func (s *MultipassServer) NodePrice(ctx context.Context, request *apigrpc.NodePriceRequest) (*apigrpc.NodePriceReply, error) {
 	glog.V(2).Infof("Call server NodePrice: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
 	return &apigrpc.NodePriceReply{
 		Response: &apigrpc.NodePriceReply_Price{
-			Price: s.config.NodePrice,
+			Price: s.Configuration.NodePrice,
 		},
 	}, nil
 }
@@ -1227,14 +1259,67 @@ func (s *MultipassServer) NodePrice(ctx context.Context, request *apigrpc.NodePr
 func (s *MultipassServer) PodPrice(ctx context.Context, request *apigrpc.PodPriceRequest) (*apigrpc.PodPriceReply, error) {
 	glog.V(2).Infof("Call server PodPrice: %v", request)
 
-	if request.GetProviderID() != s.config.ProviderID {
+	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(errMismatchingProvider)
 		return nil, fmt.Errorf(errMismatchingProvider)
 	}
 
 	return &apigrpc.PodPriceReply{
 		Response: &apigrpc.PodPriceReply_Price{
-			Price: s.config.PodPrice,
+			Price: s.Configuration.PodPrice,
 		},
 	}, nil
+}
+
+func (s *MultipassServer) save(fileName string) error {
+	file, err := os.Create(fileName)
+
+	if err != nil {
+		glog.Errorf("Failed to open file:%s, error:%v", fileName, err)
+
+		return err
+	}
+
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(s)
+
+	if err != nil {
+		glog.Errorf("failed to encode MultipassServer to file:%s, error:%v", fileName, err)
+
+		return err
+	}
+
+	return nil
+}
+
+func (s *MultipassServer) load(fileName string) error {
+	file, err := os.Open(fileName)
+
+	if err != nil {
+		glog.Errorf("Failed to open file:%s, error:%v", fileName, err)
+
+		return err
+	}
+
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(s)
+
+	if err != nil {
+		glog.Errorf("failed to decode MultipassServer file:%s, error:%v", fileName, err)
+		return err
+	}
+
+	if s.AutoProvision {
+		if err := s.doAutoProvision(); err != nil {
+			glog.Errorf(errUnableToAutoProvisionNodeGroup, err)
+
+			return err
+		}
+	}
+
+	return nil
 }

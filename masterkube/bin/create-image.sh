@@ -72,6 +72,8 @@ curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_
 mkdir -p /etc/systemd/system/kubelet.service.d
 curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf" | sed "s:/usr/bin:/usr/local/bin:g" > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 
+echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
+
 systemctl enable kubelet
 
 echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh

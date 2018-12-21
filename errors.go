@@ -57,6 +57,8 @@ const (
 	errUnableToAutoProvisionNodeGroup = "Warning can't autoprovision node group, reason: %v"
 	errUnmarshallingError             = "Unable to unmarshall node: %s as json, reason: %v"
 	errMarshallingError               = "Unable to marshall node: %s as json, reason: %v"
-	errKubeletNotConfigured           = "Can't set provider ID in kubelet for VM: %s, reason: %v"
+	errKubeletNotConfigured           = "Can't set provider ID in kubelet for VM: %s, %s, reason: %v"
 	errVMNotProvisionnedByMe          = "The VM: %s is not provisionned by me"
+	errFailedToLoadServerState        = "Failed to load server state, reason: %v"
+	errFailedToSaveServerState        = "Failed to save server state, reason: %v"
 )

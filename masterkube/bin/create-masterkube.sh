@@ -148,6 +148,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
 fi
 
 echo "Delete masterkube previous instance"
+multipass delete ca-grpc-multipass-vm-00 -p &> /dev/null
 multipass delete masterkube -p &> /dev/null
 
 ./bin/kubeconfig-delete.sh masterkube &> /dev/null

@@ -22,25 +22,25 @@ const (
 	testNodeName   = "ca-grpc-multipass-vm-00"
 )
 
-var testNodeGroup = multipassNodeGroup{
-	identifier: testGroupID,
-	machine: &MachineCharacteristic{
+var testNodeGroup = MultipassNodeGroup{
+	NodeGroupIdentifier: testGroupID,
+	Machine: &MachineCharacteristic{
 		Memory: 4096,
 		Vcpu:   4,
 		Disk:   5120,
 	},
-	status:       nodegroupNotCreated,
-	minSize:      0,
-	maxSize:      5,
-	pendingNodes: make(map[string]*multipassNode),
-	nodes:        make(map[string]*multipassNode),
-	nodeLabels: map[string]string{
+	Status:       NodegroupNotCreated,
+	MinNodeSize:  0,
+	MaxNodeSize:  5,
+	PendingNodes: make(map[string]*MultipassNode),
+	Nodes:        make(map[string]*MultipassNode),
+	NodeLabels: map[string]string{
 		"monitor":  "true",
 		"database": "true",
 	},
 }
 
-func newTestServer(nodeGroup *multipassNodeGroup) (*MultipassServer, context.Context, error) {
+func newTestServer(nodeGroup *MultipassNodeGroup) (*MultipassServer, context.Context, error) {
 
 	var config MultipassServerConfig
 
@@ -53,13 +53,13 @@ func newTestServer(nodeGroup *multipassNodeGroup) (*MultipassServer, context.Con
 	}
 
 	s := &MultipassServer{
-		resourceLimiter: &resourceLimiter{
+		ResourceLimiter: &ResourceLimiter{
 			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
 			map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
 		},
-		nodeGroups: map[string]*multipassNodeGroup{},
-		config:     config,
-		kubeAdmConfig: &apigrpc.KubeAdmConfig{
+		Groups:        map[string]*MultipassNodeGroup{},
+		Configuration: config,
+		KubeAdmConfiguration: &apigrpc.KubeAdmConfig{
 			KubeAdmAddress:        config.KubeAdm.Address,
 			KubeAdmToken:          config.KubeAdm.Token,
 			KubeAdmCACert:         config.KubeAdm.CACert,
@@ -68,7 +68,7 @@ func newTestServer(nodeGroup *multipassNodeGroup) (*MultipassServer, context.Con
 	}
 
 	if nodeGroup != nil {
-		s.nodeGroups[nodeGroup.identifier] = nodeGroup
+		s.Groups[nodeGroup.NodeGroupIdentifier] = nodeGroup
 	}
 
 	return s, nil, nil
@@ -102,26 +102,26 @@ func TestMultipassServer_NodeGroups(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -166,26 +166,26 @@ func TestMultipassServer_NodeGroupForNode(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -335,10 +335,10 @@ func TestMultipassServer_NewNodeGroup(t *testing.T) {
 	}
 }
 
-func extractResourceLimiter(res *apigrpc.ResourceLimiter) *resourceLimiter {
-	r := &resourceLimiter{
-		minLimits: res.MinLimits,
-		maxLimits: res.MaxLimits,
+func extractResourceLimiter(res *apigrpc.ResourceLimiter) *ResourceLimiter {
+	r := &ResourceLimiter{
+		MinLimits: res.MinLimits,
+		MaxLimits: res.MaxLimits,
 	}
 
 	return r
@@ -348,12 +348,12 @@ func TestMultipassServer_GetResourceLimiter(t *testing.T) {
 	tests := []struct {
 		name    string
 		request *apigrpc.CloudProviderServiceRequest
-		want    *resourceLimiter
+		want    *ResourceLimiter
 		wantErr bool
 	}{
 		{
 			name: "GetResourceLimiter",
-			want: &resourceLimiter{
+			want: &ResourceLimiter{
 				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
 				map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
 			},
@@ -457,7 +457,7 @@ func TestMultipassServer_MaxSize(t *testing.T) {
 	}{
 		{
 			name: "TargetSize",
-			want: int32(testNodeGroup.maxSize),
+			want: int32(testNodeGroup.MaxNodeSize),
 			request: &apigrpc.NodeGroupServiceRequest{
 				ProviderID:  testProviderID,
 				NodeGroupID: testGroupID,
@@ -492,7 +492,7 @@ func TestMultipassServer_MinSize(t *testing.T) {
 	}{
 		{
 			name: "MinSize",
-			want: int32(testNodeGroup.minSize),
+			want: int32(testNodeGroup.MinNodeSize),
 			request: &apigrpc.NodeGroupServiceRequest{
 				ProviderID:  testProviderID,
 				NodeGroupID: testGroupID,
@@ -527,7 +527,7 @@ func TestMultipassServer_TargetSize(t *testing.T) {
 	}{
 		{
 			name: "TargetSize",
-			want: int32(len(testNodeGroup.nodes)),
+			want: int32(len(testNodeGroup.Nodes)),
 			request: &apigrpc.NodeGroupServiceRequest{
 				ProviderID:  testProviderID,
 				NodeGroupID: testGroupID,
@@ -613,26 +613,26 @@ func TestMultipassServer_DeleteNodes(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -671,26 +671,26 @@ func TestMultipassServer_DecreaseTargetSize(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -808,26 +808,26 @@ func TestMultipassServer_Nodes(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -979,26 +979,26 @@ func TestMultipassServer_Delete(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
@@ -1096,26 +1096,26 @@ func TestMultipassServer_Belongs(t *testing.T) {
 		},
 	}
 
-	ng := multipassNodeGroup{
-		identifier: testGroupID,
-		machine: &MachineCharacteristic{
+	ng := MultipassNodeGroup{
+		NodeGroupIdentifier: testGroupID,
+		Machine: &MachineCharacteristic{
 			Memory: 4096,
 			Vcpu:   4,
 			Disk:   5120,
 		},
-		status:       nodegroupNotCreated,
-		minSize:      0,
-		maxSize:      5,
-		pendingNodes: make(map[string]*multipassNode),
-		nodes: map[string]*multipassNode{
-			testNodeName: &multipassNode{
-				nodeName:         testNodeName,
-				memory:           4096,
-				cpu:              4,
-				disk:             5120,
-				address:          []string{},
-				state:            nodeStateNotCreated,
-				autoprovisionned: true,
+		Status:       NodegroupNotCreated,
+		MinNodeSize:  0,
+		MaxNodeSize:  5,
+		PendingNodes: make(map[string]*MultipassNode),
+		Nodes: map[string]*MultipassNode{
+			testNodeName: &MultipassNode{
+				NodeName:         testNodeName,
+				Memory:           4096,
+				CPU:              4,
+				Disk:             5120,
+				Addresses:        []string{},
+				State:            MultipassNodeStateNotCreated,
+				AutoProvisionned: true,
 			},
 		},
 	}
