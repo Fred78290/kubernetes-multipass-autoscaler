@@ -1,19 +1,40 @@
 #/bin/bash
+
+# This script create every thing to deploy a simple kubernetes autoscaled cluster with multipass.
+# It will generate:
+# Custom multipass image with every thing for kubernetes
+# Config file to deploy the cluster autoscaler.
+
 CURDIR=$(dirname $0)
 
-sudo apt-get install python-yaml -y
+#sudo apt-get install python-yaml -y
 
-CUSTOM_IMAGE=YES
-SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-#KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
-KUBERNETES_VERSION=v1.12.4
-KUBERNETES_PASSWORD=$(uuidgen)
-KUBECONFIG=$HOME/.kube/config
-TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
-CNI_VERSION="v0.7.1"
-PROVIDERID="multipass://ca-grpc-multipass/object?type=node&name=masterkube"
+export CUSTOM_IMAGE=YES
+export SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
+export KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
+export KUBERNETES_VERSION=v1.12.4
+export KUBERNETES_PASSWORD=$(uuidgen)
+export KUBECONFIG=$HOME/.kube/config
+export TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+export CNI_VERSION="v0.7.1"
+export PROVIDERID="multipass://ca-grpc-multipass/object?type=node&name=masterkube"
+export MINNODES=0
+export MAXNODES=5
+export MAXTOTALNODES=$MAXNODES
+export CORESTOTAL="0:16"
+export MEMORYTOTAL="0:24"
+export MAXAUTOPROVISIONNEDNODEGROUPCOUNT="1"
+export SCALEDOWNENABLED="true"
+export SCALEDOWNDELAYAFTERADD="1m"
+export SCALEDOWNDELAYAFTERDELETE="1m"
+export SCALEDOWNDELAYAFTERFAILURE="1m"
+export SCALEDOWNUNEEDEDTIME="1m"
+export SCALEDOWNUNREADYTIME="1m"
+export DEFAULT_MACHINE="medium"
+export UNREMOVABLENODERECHECKTIMEOUT="1m"
 
-TEMP=`getopt -o ci:k:n:p:v: --long no-custom-image,custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=`getopt -o ci:k:n:p:v: --long no-custom-image,image:,ssh-key:,cni-version:,password:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@"`
+
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
@@ -23,25 +44,73 @@ while true ; do
             CUSTOM_IMAGE="NO"
             shift 1
             ;;
-        -i|--custom-image)
+        -d|--default-machine)
+            DEFAULT_MACHINE="$2"
+            shift 2
+            ;;
+        -i|--image)
             TARGET_IMAGE="$2"
             shift 2
             ;;
         -k|--ssh-key)
-            SSH_KEY=$2
+            SSH_KEY="$2"
             shift 2
             ;;
         -n|--cni-version)
-            CNI_VERSION=$2
+            CNI_VERSION="$2"
             shift 2
             ;;
         -p|--password)
-            KUBERNETES_PASSWORD=$2
+            KUBERNETES_PASSWORD="$2"
             shift 2
             ;;
         -v|--kubernetes-version)
-            KUBERNETES_VERSION=$2
-            TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+            KUBERNETES_VERSION="$2"
+            TARGET_IMAGE="$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img"
+            shift 2
+            ;;
+        --max-nodes-total)
+            MAXTOTALNODES="$2"
+            shift 2
+            ;;
+        --cores-total)
+            CORESTOTAL="$2"
+            shift 2
+            ;;
+        --memory-total)
+            MEMORYTOTAL="$2"
+            shift 2
+            ;;
+        --max-autoprovisioned-node-group-count)
+            MAXAUTOPROVISIONNEDNODEGROUPCOUNT="$2"
+            shift 2
+            ;;
+        --scale-down-enabled)
+            SCALEDOWNENABLED="$2"
+            shift 2
+            ;;
+        --scale-down-delay-after-add)
+            SCALEDOWNDELAYAFTERADD="$2"
+            shift 2
+            ;;
+        --scale-down-delay-after-delete)
+            SCALEDOWNDELAYAFTERDELETE="$2"
+            shift 2
+            ;;
+        --scale-down-delay-after-failure)
+            SCALEDOWNDELAYAFTERFAILURE="$2"
+            shift 2
+            ;;
+        --scale-down-unneeded-time)
+            SCALEDOWNUNEEDEDTIME="$2"
+            shift 2
+            ;;
+        --scale-down-unready-time)
+            SCALEDOWNUNREADYTIME="$2"
+            shift 2
+            ;;
+        --unremovable-node-recheck-timeout)
+            UNREMOVABLENODERECHECKTIMEOUT="$2"
             shift 2
             ;;
         --)
@@ -134,9 +203,6 @@ fi
 
 export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text < ./etc/ssl/cert.pem | grep 'Subject: CN =' | awk '{print $4}' | sed 's/\*\.//g')
 
-rm -rf cluster/*
-rm -rf config/*
-rm -rf kubernetes/*
 
 if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
     echo "Create multipass preconfigured image"
@@ -147,14 +213,10 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
         --kubernetes-version=$KUBERNETES_VERSION
 fi
 
-echo "Delete masterkube previous instance"
-multipass delete ca-grpc-multipass-vm-00 -p &> /dev/null
-multipass delete masterkube -p &> /dev/null
-
-./bin/kubeconfig-delete.sh masterkube &> /dev/null
+./bin/delete-masterkube.sh
 
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
-    echo "Launch custom masterkube instance"
+    echo "Launch custom masterkube instance with $TARGET_IMAGE"
 
     cat > ./config/cloud-init-masterkube.json <<-EOF
     {
@@ -211,6 +273,7 @@ echo "Prepare masterkube instance"
 
 multipass shell masterkube <<EOF
 sudo usermod -aG docker multipass
+sudo usermod -aG docker kubernetes
 echo "Start kubernetes masterkube instance master node"
 sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:$PATH; kubeadm config images pull; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
 exit
@@ -222,7 +285,8 @@ CACERT=$(cat ./cluster/ca.cert)
 NET_IF=$(ip route get 1|awk '{print $5;exit}')
 IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
 
-kubectl label nodes masterkube master=true --kubeconfig=./cluster/config
+kubectl annotate node masterkube "cluster.autoscaler.nodegroup/name=ca-grpc-multipass" "cluster.autoscaler.nodegroup/node-index=0" "cluster.autoscaler.nodegroup/autoprovision=false" "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" --overwrite --kubeconfig=./cluster/config
+kubectl label nodes masterkube "cluster.autoscaler.nodegroup/name=ca-grpc-multipass" "master=true" --overwrite --kubeconfig=./cluster/config
 kubectl create secret tls kube-system -n kube-system --key ./etc/ssl/privkey.pem --cert ./etc/ssl/fullchain.pem --kubeconfig=./cluster/config
 
 ./bin/kubeconfig-merge.sh masterkube cluster/config
@@ -239,8 +303,8 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
     {
         "listen": "$IPADDR:5200",
         "secret": "multipass",
-        "minNode": 0,
-        "maxNode": 5,
+        "minNode": $MINNODES,
+        "maxNode": $MAXNODES,
         "nodePrice": 0.0,
         "podPrice": 0.0,
         "image": "file://$TARGET_IMAGE",
@@ -262,7 +326,7 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
                 "--ignore-preflight-errors=All"
             ]
         },
-        "default-machine": "medium",
+        "default-machine": "$DEFAULT_MACHINE",
         "machines": $MACHINE_DEFS,
         "cloud-init": {
             "package_update": false,
@@ -288,8 +352,8 @@ else
     {
         "listen": "$IPADDR:5200",
         "secret": "multipass",
-        "minNode": 0,
-        "maxNode": 5,
+        "minNode": $MINNODES,
+        "maxNode": $MAXNODES,
         "nodePrice": 0.0,
         "podPrice": 0.0,
         "image": "bionic",
@@ -311,7 +375,7 @@ else
                 "--ignore-preflight-errors=All"
             ]
         },
-        "default-machine": "medium",
+        "default-machine": "$DEFAULT_MACHINE",
         "machines": $MACHINE_DEFS,
         "cloud-init": {
             "package_update": true,
@@ -344,17 +408,9 @@ HOSTS_DEF=$(multipass info masterkube|grep IPv4|awk "{print \$2 \"    masterkube
 sudo sed -i '/masterkube/d' /etc/hosts
 sudo bash -c "echo '$HOSTS_DEF' >> /etc/hosts"
 
-echo "Create docker registry secret"
-kubectl create secret docker-registry $GITLAB_REGISTRY \
-    --docker-username=$GITLAB_UID \
-    --docker-password=$GITLAB_PWD \
-    --docker-server=$GITLAB_REGISTRY \
-    --docker-email=$GITLAB_EMAIL \
-    --kubeconfig=./cluster/config \
-	-n kube-system
-
 ./bin/create-ingress-controller.sh
 ./bin/create-dashboard.sh
+./bin/create-autoscaler.sh
 ./bin/create-helloworld.sh
 
 popd

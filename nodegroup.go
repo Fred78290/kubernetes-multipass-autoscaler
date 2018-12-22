@@ -31,21 +31,23 @@ const (
 // Each node have name like <node group name>-vm-<vm index>
 type MultipassNodeGroup struct {
 	sync.Mutex
-	NodeGroupIdentifier string                    `json:"identifier"`
-	ServiceIdentifier   string                    `json:"service"`
-	Machine             *MachineCharacteristic    `json:"machine"`
-	Status              NodeGroupState            `json:"status"`
-	MinNodeSize         int                       `json:"minSize"`
-	MaxNodeSize         int                       `json:"maxSize"`
-	Nodes               map[string]*MultipassNode `json:"nodes"`
-	NodeLabels          map[string]string         `json:"nodeLabels"`
-	SystemLabels        map[string]string         `json:"systemLabels"`
-	AutoProvision       bool                      `json:"auto-provision"`
-	PendingNodes        map[string]*MultipassNode `json:"-"`
-	PendingNodesWG      sync.WaitGroup            `json:"-"`
+	NodeGroupIdentifier  string                    `json:"identifier"`
+	ServiceIdentifier    string                    `json:"service"`
+	Machine              *MachineCharacteristic    `json:"machine"`
+	Status               NodeGroupState            `json:"status"`
+	MinNodeSize          int                       `json:"minSize"`
+	MaxNodeSize          int                       `json:"maxSize"`
+	Nodes                map[string]*MultipassNode `json:"nodes"`
+	NodeLabels           map[string]string         `json:"nodeLabels"`
+	SystemLabels         map[string]string         `json:"systemLabels"`
+	AutoProvision        bool                      `json:"auto-provision"`
+	LastCreatedNodeIndex int                       `json:"node-index"`
+	PendingNodes         map[string]*MultipassNode `json:"-"`
+	PendingNodesWG       sync.WaitGroup            `json:"-"`
 }
 
 type nodeCreationExtra struct {
+	nodegroupID   string
 	kubeHost      string
 	kubeToken     string
 	kubeCACert    string
@@ -148,23 +150,24 @@ func (g *MultipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) e
 func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) error {
 	glog.V(5).Infof("MultipassNodeGroup::addNodes, nodeGroupID:%s", g.NodeGroupIdentifier)
 
-	startIndex := g.targetSize()
-	endIndex := startIndex + delta
 	tempNodes := make([]*MultipassNode, 0, delta)
 
 	g.PendingNodesWG.Add(delta)
 
-	for nodeIndex := startIndex; nodeIndex < endIndex; nodeIndex++ {
+	for nodeIndex := 0; nodeIndex < delta; nodeIndex++ {
 		if g.Status != NodegroupCreated {
 			glog.V(5).Infof("MultipassNodeGroup::addNodes, nodeGroupID:%s -> g.status != nodegroupCreated", g.NodeGroupIdentifier)
 			break
 		}
 
-		nodeName := g.nodeName(nodeIndex)
+		g.LastCreatedNodeIndex++
+
+		nodeName := g.nodeName(g.LastCreatedNodeIndex)
 
 		node := &MultipassNode{
 			ProviderID:       g.providerIDForNode(nodeName),
 			NodeName:         nodeName,
+			NodeIndex:        g.LastCreatedNodeIndex,
 			Memory:           g.Machine.Memory,
 			CPU:              g.Machine.Vcpu,
 			Disk:             g.Machine.Disk,
@@ -172,6 +175,10 @@ func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 		}
 
 		tempNodes = append(tempNodes, node)
+
+		if g.PendingNodes == nil {
+			g.PendingNodes = make(map[string]*MultipassNode)
+		}
 
 		g.PendingNodes[node.NodeName] = node
 	}
@@ -210,6 +217,7 @@ func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 }
 
 func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconfig string) error {
+	var lastNodeIndex = 0
 	var nodeInfos apiv1.NodeList
 	var out string
 	var err error
@@ -231,7 +239,10 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 		return fmt.Errorf(errUnmarshallingError, "MultipassNodeGroup::autoDiscoveryNodes", err)
 	}
 
+	formerNodes := g.Nodes
+
 	g.Nodes = make(map[string]*MultipassNode)
+	g.PendingNodes = make(map[string]*MultipassNode)
 
 	for _, nodeInfo := range nodeInfos.Items {
 		var providerID = getNodeProviderID(g.ServiceIdentifier, &nodeInfo)
@@ -241,9 +252,11 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 			out, err = nodeGroupIDFromProviderID(g.ServiceIdentifier, providerID)
 
 			if out == g.NodeGroupIdentifier {
-				glog.V(2).Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
+				glog.Infof("Discover node:%s matching nodegroup:%s", providerID, g.NodeGroupIdentifier)
 
 				if nodeID, err = nodeNameFromProviderID(g.ServiceIdentifier, providerID); err == nil {
+					node := formerNodes[nodeID]
+
 					runningIP := ""
 
 					for _, address := range nodeInfo.Status.Addresses {
@@ -253,52 +266,64 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 						}
 					}
 
-					glog.V(2).Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
+					glog.Infof("Add node:%s with IP:%s to nodegroup:%s", nodeID, runningIP, g.NodeGroupIdentifier)
 
-					node := &MultipassNode{
-						ProviderID:       providerID,
-						NodeName:         nodeID,
-						State:            MultipassNodeStateRunning,
-						AutoProvisionned: nodeInfo.Annotations[annotationNodeAutoProvisionned] == "true",
-						Addresses: []string{
-							runningIP,
-						},
+					if len(nodeInfo.Annotations[annotationNodeIndex]) != 0 {
+						lastNodeIndex, _ = strconv.Atoi(nodeInfo.Annotations[annotationNodeIndex])
 					}
+
+					g.LastCreatedNodeIndex = maxInt(g.LastCreatedNodeIndex, lastNodeIndex)
+
+					if node == nil {
+						node = &MultipassNode{
+							ProviderID:       providerID,
+							NodeName:         nodeID,
+							NodeIndex:        lastNodeIndex,
+							State:            MultipassNodeStateRunning,
+							AutoProvisionned: nodeInfo.Annotations[annotationNodeAutoProvisionned] == "true",
+							Addresses: []string{
+								runningIP,
+							},
+						}
+
+						arg = []string{
+							"kubectl",
+							"annotate",
+							"node",
+							nodeInfo.Name,
+							fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
+							fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
+							fmt.Sprintf("%s=%d", annotationNodeIndex, node.NodeIndex),
+							"--overwrite",
+							"--kubeconfig",
+							kubeconfig,
+						}
+
+						if err := shell(arg...); err != nil {
+							glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
+						}
+
+						arg = []string{
+							"kubectl",
+							"label",
+							"nodes",
+							nodeInfo.Name,
+							fmt.Sprintf("%s=%s", nodeLabelGroupName, g.NodeGroupIdentifier),
+							"--overwrite",
+							"--kubeconfig",
+							kubeconfig,
+						}
+
+						if err := shell(arg...); err != nil {
+							glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
+						}
+					}
+
+					lastNodeIndex++
 
 					g.Nodes[nodeID] = node
 
 					node.statusVM()
-
-					arg = []string{
-						"kubectl",
-						"annotate",
-						"node",
-						nodeInfo.Name,
-						fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
-						fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
-						"--overwrite",
-						"--kubeconfig",
-						kubeconfig,
-					}
-
-					if err := shell(arg...); err != nil {
-						glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
-					}
-
-					arg = []string{
-						"kubectl",
-						"label",
-						"nodes",
-						nodeInfo.Name,
-						fmt.Sprintf("%s=%s", nodeLabelGroupName, g.NodeGroupIdentifier),
-						"--overwrite",
-						"--kubeconfig",
-						kubeconfig,
-					}
-
-					if err := shell(arg...); err != nil {
-						glog.Errorf(errKubeCtlIgnoredError, nodeInfo.Name, err)
-					}
 				}
 			}
 		}

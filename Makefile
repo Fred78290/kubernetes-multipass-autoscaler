@@ -9,7 +9,7 @@ FLAGS=
 ENVVAR=
 GOOS?=linux
 GOARCH?=amd64
-REGISTRY?=registry.gitlab.com/frederic.boltz/k8s-autoscaler
+REGISTRY?=fred78290
 BASEIMAGE?=k8s.gcr.io/debian-base-amd64:0.3.2
 #VERSION_LDFLAGS := -X github.com/Fred78290/kubernetes-multipass-autoscaler/pkg/version.version=$(VERSION)
 BUILD_DATE?=`date +%Y-%m-%dT%H:%M:%SZ`
@@ -41,15 +41,6 @@ test-unit: clean deps build
 dev-release: build-binary execute-release
 	@echo "Release ${TAG}${FOR_PROVIDER} completed"
 
-make-image:
-	docker build --pull --build-arg BASEIMAGE=${BASEIMAGE} \
-	    -t ${REGISTRY}/kubernetes-multipass-autoscaler${PROVIDER}:${TAG} .
-
-push-image:
-	./push_image.sh ${REGISTRY}/kubernetes-multipass-autoscaler${PROVIDER}:${TAG}
-
-execute-release: make-image push-image
-
 clean:
 #	sudo rm -rf out
 
@@ -68,7 +59,7 @@ build-in-docker: docker-builder
 release: build-in-docker execute-release
 	@echo "Full in-docker release ${TAG}${FOR_PROVIDER} completed"
 
-container: clean build-in-docker make-image
+container: clean build-in-docker
 	@echo "Created in-docker image ${TAG}${FOR_PROVIDER}"
 
 test-in-docker: clean docker-builder

@@ -24,7 +24,14 @@ EOF") | jq . > $ETC_DIR/$1.json
 kubectl apply -f $ETC_DIR/$1.json --kubeconfig=./cluster/config
 }
 
-#nohup ./out/multipass-autoscaler-$GOOS-amd64 --config ./config/kubernetes-multipass-autoscaler.json -v=9 -logtostderr=true &> kubernetes-multipass-autoscaler.log &
+nohup ../out/multipass-autoscaler-$GOOS-amd64 \
+    --config=$PWD/config/kubernetes-multipass-autoscaler.json \
+    --save=$PWD/config/autoscaler-state.json \
+    -v=1 \
+    -logtostderr=true  1>>config/multipass-autoscaler.log 2>&1 &
+pid="$!"
+
+echo -n "$pid" > config/multipass-autoscaler.pid
 
 deploy service-account
 deploy cluster-role

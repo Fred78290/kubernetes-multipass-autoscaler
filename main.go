@@ -106,7 +106,7 @@ func main() {
 			}
 		}
 
-		glog.V(2).Infof("Start listening server on %s", config.Listen)
+		glog.Infof("Start listening server on %s", config.Listen)
 
 		lis, err := net.Listen("tcp", config.Listen)
 
@@ -126,7 +126,7 @@ func main() {
 			log.Fatalf("failed to serve: %v", err)
 		}
 
-		glog.V(2).Infof("End listening server")
+		glog.Infof("End listening server")
 		glog.Flush()
 	}
 }

@@ -41,6 +41,7 @@ const (
 type MultipassNode struct {
 	ProviderID       string             `json:"providerID"`
 	NodeName         string             `json:"name"`
+	NodeIndex        int                `json:"index"`
 	Memory           int                `json:"memory"`
 	CPU              int                `json:"cpu"`
 	Disk             int                `json:"disk"`
@@ -182,20 +183,18 @@ func (vm *MultipassNode) waitReady(kubeconfig string) error {
 			return fmt.Errorf(errUnmarshallingError, vm.NodeName, err)
 		}
 
-		//glog.V(5).Infof("multipassNode::waitReady, %v", nodeInfo)
-
 		for _, status := range nodeInfo.Status.Conditions {
 			if status.Type == "Ready" {
 				if b, e := strconv.ParseBool(string(status.Status)); e == nil {
 					if b {
-						glog.V(5).Infof("multipassNode::waitReady, (%d) VM %s is Ready", index, vm.NodeName)
+						glog.Infof("The kubernetes node %s is Ready", vm.NodeName)
 						return nil
 					}
 				}
 			}
 		}
 
-		glog.V(5).Infof("multipassNode::waitReady, (%d) node:%s not ready", index, vm.NodeName)
+		glog.Infof("The kubernetes node:%s is not ready", vm.NodeName)
 
 		time.Sleep(5 * time.Second)
 	}
@@ -263,7 +262,9 @@ func (vm *MultipassNode) setNodeLabels(extras *nodeCreationExtra) error {
 		"annotate",
 		"node",
 		vm.NodeName,
-		fmt.Sprintf("%s=%s", nodeLabelGroupName, strconv.FormatBool(vm.AutoProvisionned)),
+		fmt.Sprintf("%s=%s", nodeLabelGroupName, extras.nodegroupID),
+		fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(vm.AutoProvisionned)),
+		fmt.Sprintf("%s=%d", annotationNodeIndex, vm.NodeIndex),
 		"--overwrite",
 		"--kubeconfig",
 		extras.kubeConfig,
@@ -282,6 +283,8 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 	var cloudInitFile *os.File
 	var err error
 	var status MultipassNodeState
+
+	glog.Infof("Launch VM:%s for nodegroup: %s", vm.NodeName, extras.nodegroupID)
 
 	if vm.AutoProvisionned == false {
 		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
@@ -351,7 +354,6 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 		if err = shell(args...); err != nil {
 			glog.Errorf(errUnableToLaunchVM, vm.NodeName, err)
 		} else {
-
 			// Add mount point
 			if extras.mountPoints != nil && len(extras.mountPoints) > 0 {
 				for hostPath, guestPath := range extras.mountPoints {
@@ -386,6 +388,8 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 		}
 	}
 
+	glog.Infof("Launched VM:%s for nodegroup: %s", vm.NodeName, extras.nodegroupID)
+
 	return err
 }
 
@@ -394,6 +398,8 @@ func (vm *MultipassNode) startVM(kubeconfig string) error {
 
 	var err error
 	var state MultipassNodeState
+
+	glog.Infof("Start VM:%s", vm.NodeName)
 
 	if vm.AutoProvisionned == false {
 		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
@@ -429,6 +435,8 @@ func (vm *MultipassNode) startVM(kubeconfig string) error {
 		return fmt.Errorf(errVMNotFound, vm.NodeName)
 	}
 
+	glog.Infof("Started VM:%s", vm.NodeName)
+
 	return nil
 }
 
@@ -437,6 +445,8 @@ func (vm *MultipassNode) stopVM(kubeconfig string) error {
 
 	var err error
 	var state MultipassNodeState
+
+	glog.Infof("Stop VM:%s", vm.NodeName)
 
 	if vm.AutoProvisionned == false {
 		glog.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
@@ -471,6 +481,8 @@ func (vm *MultipassNode) stopVM(kubeconfig string) error {
 		glog.Errorf(errVMNotFound, vm.NodeName)
 		return fmt.Errorf(errVMNotFound, vm.NodeName)
 	}
+
+	glog.Infof("Stopped VM:%s", vm.NodeName)
 
 	return nil
 }
@@ -567,6 +579,8 @@ func (vm *MultipassNode) statusVM() (MultipassNodeState, error) {
 		default:
 			vm.State = MultipassNodeStateUndefined
 		}
+
+		vm.Addresses = vmInfo.Ipv4
 
 		return vm.State, nil
 	}

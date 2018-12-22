@@ -5,20 +5,20 @@
         "name": "cluster-autoscaler",
         "namespace": "kube-system",
         "labels": {
-            "app": "cluster-autoscaler"
+            "k8s-app": "cluster-autoscaler"
         }
     },
     "spec": {
         "replicas": 1,
         "selector": {
             "matchLabels": {
-                "app": "cluster-autoscaler"
+                "k8s-app": "cluster-autoscaler"
             }
         },
         "template": {
             "metadata": {
                 "labels": {
-                    "app": "cluster-autoscaler"
+                    "k8s-app": "cluster-autoscaler"
                 },
                 "annotations": {
                     "scheduler.alpha.kubernetes.io/critical-pod": ""
@@ -29,14 +29,9 @@
                 "nodeSelector": {
                     "master": "true"
                 },
-                "imagePullSecrets": [
-                    {
-                        "name": "$GITLAB_REGISTRY"
-                    }
-                ],
                 "containers": [
                     {
-                        "image": "registry.gitlab.com/frederic.boltz/k8s-autoscaler/cluster-autoscaler:dev",
+                        "image": "fred78290/cluster-autoscaler:v1.2.2",
                         "name": "cluster-autoscaler",
                         "resources": {
                             "limits": {
@@ -50,22 +45,23 @@
                         },
                         "command": [
                             "./cluster-autoscaler",
-                            "--v=4",
+                            "--v=1",
                             "--stderrthreshold=info",
                             "--cloud-provider=grpc",
-                            "--cloud-config=/etc/cluster-autoscaler/grpc-config.conf",
-                            "--nodes=0:3:true/ca-grpc-multipass",
-                            "--max-nodes-total=3",
-                            "--cores-total=0:16",
-                            "--memory-total=2:24",
+                            "--cloud-config=/etc/cluster-autoscaler/grpc-config.json",
+                            "--nodes=$MINNODES:$MAXNODES:true/ca-grpc-multipass",
+                            "--max-nodes-total=$MAXTOTALNODES",
+                            "--cores-total=$CORESTOTAL",
+                            "--memory-total=$MEMORYTOTAL",
                             "--node-autoprovisioning-enabled",
-                            "--max-autoprovisioned-node-group-count=1",
-                            "--scale-down-enabled=true",
-                            "--scale-down-delay-after-add=1m",
-                            "--scale-down-delay-after-delete=1m",
-                            "--scale-down-delay-after-failure=1m",
-                            "--scale-down-unneeded-time=1m",
-                            "--scale-down-unready-time=1m"
+                            "--max-autoprovisioned-node-group-count=$MAXAUTOPROVISIONNEDNODEGROUPCOUNT",
+                            "--scale-down-enabled=$SCALEDOWNENABLED",
+                            "--scale-down-delay-after-add=$SCALEDOWNDELAYAFTERADD",
+                            "--scale-down-delay-after-delete=$SCALEDOWNDELAYAFTERDELETE",
+                            "--scale-down-delay-after-failure=$SCALEDOWNDELAYAFTERFAILURE",
+                            "--scale-down-unneeded-time=$SCALEDOWNUNEEDEDTIME",
+                            "--scale-down-unready-time=$SCALEDOWNUNREADYTIME",
+                            "--unremovable-node-recheck-timeout=$UNREMOVABLENODERECHECKTIMEOUT"
                         ],
                         "imagePullPolicy": "Always",
                         "volumeMounts": [

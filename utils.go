@@ -37,7 +37,7 @@ func getNodeProviderID(serverIdentifier string, node *apiv1.Node) string {
 
 		if len(nodegroupName) != 0 {
 			providerID = fmt.Sprintf("%s://%s/object?type=node&name=%s", serverIdentifier, nodegroupName, node.Name)
-			glog.V(2).Infof("Warning misconfiguration: node providerID: %s is extracted from node label.", providerID)
+			glog.Infof("Warning misconfiguration: node providerID: %s is extracted from node label.", providerID)
 		}
 	}
 
@@ -102,4 +102,18 @@ func fileExists(name string) bool {
 	}
 
 	return true
+}
+
+func minInt(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+func maxInt(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
 }

@@ -121,6 +121,8 @@
                 "apps"
             ],
             "resources": [
+                "replicasets",
+                "daemonsets",
                 "statefulsets"
             ],
             "verbs": [
