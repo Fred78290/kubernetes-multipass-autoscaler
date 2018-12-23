@@ -8,10 +8,17 @@ Ensure that you have sudo right
 
 You must also install
 
+Linux Plateform
     multipass
     libvirt
     python
     python-yaml
+
+Darwin Plateform
+    multipass
+    python
+    python-yaml
+    gnu-getopt
 
 ## Create the masterkube
 
@@ -70,6 +77,6 @@ To scale up or down the cluster, just play with `kubectl scale`
 
 To scale fresh masterkube `kubectl scale --replicas=2 deploy/helloworld -n kube-public`
 
-## Delete master kube and children
+## Delete master kube and worker nodes
 
-To delete the master kube and associated children, just run the command [delete-masterkube.sh](./bin/delete-masterkube.sh)
+To delete the master kube and associated worker nodes, just run the command [delete-masterkube.sh](./bin/delete-masterkube.sh)

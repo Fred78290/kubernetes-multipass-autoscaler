@@ -12,7 +12,7 @@ TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-kubernetes-amd64.img
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
 CNI_VERSION=v0.7.1
-
+CACHE=~/.local/multipass/cache
 TEMP=`getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
 
@@ -102,13 +102,13 @@ EOF
 
 chmod +x /tmp/prepare-k8s-bionic.sh
 
-if [ ! -f ~/.local/multipass/cache/bionic-server-cloudimg-amd64.img ]; then
-    mkdir -p ~/.local/multipass/cache
+[ -d $CACHE ] || mkdir -p $CACHE
 
-    wget https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img -O ~/.local/multipass/cache/bionic-server-cloudimg-amd64.img
+if [ ! -f $CACHE/bionic-server-cloudimg-amd64.img ]; then
+    wget https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img -O $CACHE/bionic-server-cloudimg-amd64.img
 fi
 
-cp ~/.local/multipass/cache/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
+cp $CACHE/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
 
 qemu-img resize $TARGET_IMAGE 5G
 sudo virt-customize --network -a $TARGET_IMAGE --timezone Europe/Paris
