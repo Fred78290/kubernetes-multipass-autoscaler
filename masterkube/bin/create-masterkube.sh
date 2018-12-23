@@ -318,7 +318,7 @@ EOF
 	LAUNCH_IMAGE_URL="bionic"
 fi
 
-multipass launch -n masterkube -m 4096 -c 2 --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
+multipass launch -n masterkube -m 4096 -c 2 -d 10G --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
 
 # Due bug in multipass MacOS, we need to reboot manually the VM after apt upgrade
 if [ "$CUSTOM_IMAGE" != "YES" ] && [ "$OSDISTRO" != "Linux" ]; then
