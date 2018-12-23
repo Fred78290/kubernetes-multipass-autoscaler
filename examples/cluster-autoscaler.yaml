@@ -136,7 +136,7 @@ spec:
     spec:
       serviceAccountName: cluster-autoscaler
       containers:
-        - image: fred78290/cluster-autoscaler:v1.2.2
+        - image: fred78290/cluster-autoscaler:v1.12.4
           name: cluster-autoscaler
           resources:
             limits:
