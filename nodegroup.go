@@ -132,7 +132,7 @@ func (g *MultipassNodeGroup) deleteNodes(delta int, extras *nodeCreationExtra) e
 
 		if node := g.Nodes[nodeName]; node != nil {
 			if err := node.deleteVM(extras.kubeConfig); err != nil {
-				glog.Errorf(errUnableToDeleteVM, node.NodeName)
+				glog.Errorf(errUnableToDeleteVM, node.NodeName, err)
 				return err
 			}
 
@@ -197,7 +197,7 @@ func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 
 				if status, _ := node.statusVM(); status == MultipassNodeStateRunning {
 					if err := node.deleteVM(extras.kubeConfig); err != nil {
-						glog.Errorf(errUnableToDeleteVM, node.NodeName)
+						glog.Errorf(errUnableToDeleteVM, node.NodeName, err)
 					}
 				}
 
@@ -338,7 +338,7 @@ func (g *MultipassNodeGroup) deleteNodeByName(kubeconfig, nodeName string) error
 	if node := g.Nodes[nodeName]; node != nil {
 
 		if err := node.deleteVM(kubeconfig); err != nil {
-			glog.Errorf(errUnableToDeleteVM, node.NodeName)
+			glog.Errorf(errUnableToDeleteVM, node.NodeName, err)
 			return err
 		}
 
