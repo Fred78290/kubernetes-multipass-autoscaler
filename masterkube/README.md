@@ -52,13 +52,13 @@ During the process the script will create many files located in
 
 | Parameter | Description | Default |
 | --- | --- |--- |
-| `-c|--no-custom-image` | Use standard image  | NO |
-| `-d|--default-machine`  | Kind of machine to launch if not speficied  | medium |
-| `-i|--image`  | Alternate image  ||
-| `-k|--ssh-key`  |Alternate ssh key file |~/.ssh/id_rsa|
-| `-n|--cni-version`  |CNI version |0.71
-| `-p|--password`  |Define the kubernetes user password |randomized|
-| `-v|--kubernetes-version`  |Which version of kubernetes to use |latest|
+| `-c or --no-custom-image` | Use standard image  | NO |
+| `-d or --default-machine`  | Kind of machine to launch if not speficied  | medium |
+| `-i or --image`  | Alternate image  ||
+| `-k or --ssh-key`  |Alternate ssh key file |~/.ssh/id_rsa|
+| `-n or --cni-version`  |CNI version |0.71
+| `-p or--password`  |Define the kubernetes user password |randomized|
+| `-v or --kubernetes-version`  |Which version of kubernetes to use |latest|
 | `--max-nodes-total` | Maximum number of nodes in all node groups. Cluster autoscaler will not grow the cluster beyond this number. | 5 |
 | `--cores-total` | Minimum and maximum number of cores in cluster, in the format <min>:<max>. Cluster autoscaler will not scale the cluster beyond these numbers. | 0:16 |
 | `--memory-total` | Minimum and maximum number of gigabytes of memory in cluster, in the format <min>:<max>. Cluster autoscaler will not scale the cluster beyond these numbers. | 0:24 |
