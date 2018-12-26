@@ -29,11 +29,12 @@ export SCALEDOWNUNEEDEDTIME="1m"
 export SCALEDOWNUNREADYTIME="1m"
 export DEFAULT_MACHINE="medium"
 export UNREMOVABLENODERECHECKTIMEOUT="1m"
-export OSDISTRO=$(uname -a)
+export OSDISTRO=$(uname -s)
 export TRANSPORT="unix"
 export LOWBANDWIDTH="NO"
+export PORT=5200
 
-TEMP=$(getopt -o cli:k:n:p:t:v: --long low-bandwidth,transport:,no-custom-image,image:,ssh-key:,cni-version:,password:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o cli:k:n:p:t:v: --long port:,low-bandwidth,transport:,no-custom-image,image:,ssh-key:,cni-version:,password:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "$TEMP"
 
@@ -62,6 +63,10 @@ while true; do
         ;;
 	-n | --cni-version)
 		CNI_VERSION="$2"
+		shift 2
+		;;
+	--port)
+		PORT="$2"
 		shift 2
 		;;
 	-p | --password)
@@ -134,8 +139,10 @@ done
 
 # GRPC network endpoint
 if [ "$TRANSPORT" == "unix" ]; then
+    sudo mkdir -p /var/run/cluster-autoscaler
+    sudo chown 777 /var/run/cluster-autoscaler
     LISTEN="/var/run/cluster-autoscaler/grpc.sock"
-    CONNECTTO="/var/run/cluster-autoscaler/grpc.sock"
+    CONNECTTO="${TRANSPORT}:${LISTEN}"
 elif [ "$TRANSPORT" == "tcp" ]; then
     if [ "$OSDISTRO" == "Linux" ]; then
         NET_IF=$(ip route get 1 | awk '{print $5;exit}')
@@ -145,8 +152,8 @@ elif [ "$TRANSPORT" == "tcp" ]; then
         IPADDR=$(ifconfig $NET_IF | grep "inet\s" | sed -n 1p | awk '{print $2}')
     fi
 
-    LISTEN="${IPADDR}:5200"
-    CONNECTTO="${IPADDR}:5200"
+    LISTEN="0:0:0:0:${PORT}"
+    CONNECTTO="${IPADDR}:${PORT}"
 else
     echo "Unknown transport: ${TRANSPORT}, should be unix or tcp"
     exit -1
@@ -232,7 +239,7 @@ EOF
         "systemctl enable kubelet",
         "systemctl restart kubelet",
         "echo 'export PATH=/opt/bin:/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
-        "apt autoremove -y"
+        "apt autoremove -y",
         "echo '#!/bin/bash' > /usr/local/bin/kubeimage",
         "echo '/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}' >> /usr/local/bin/kubeimage",
         "chmod +x /usr/local/bin/kubeimage"
@@ -373,16 +380,21 @@ fi
 
 ./bin/delete-masterkube.sh
 
-if [ "$CUSTOM_IMAGE" = "YES" ]; then
+if [ "$CUSTOM_IMAGE" == "YES" ]; then
 	echo "Launch custom masterkube instance with $TARGET_IMAGE"
 
 	cat <<EOF | tee ./config/cloud-init-masterkube.json | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >./config/cloud-init-masterkube.yaml
     {
-        "package_update": false,
-        "package_upgrade": false,
+        "package_update": true,
+        "package_upgrade": true,
         "users": $KUBERNETES_USER,
         "ssh_authorized_keys": [
             "$SSH_KEY"
+        ],
+        "runcmd": [
+            "echo '#!/bin/bash' > /usr/local/bin/kubeimage",
+            "echo '/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}' >> /usr/local/bin/kubeimage",
+            "chmod +x /usr/local/bin/kubeimage"
         ],
         "group": [
             "kubernetes"
