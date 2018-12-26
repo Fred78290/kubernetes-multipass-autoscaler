@@ -108,7 +108,7 @@ func main() {
 
 		glog.Infof("Start listening server on %s", config.Listen)
 
-		lis, err := net.Listen("tcp", config.Listen)
+		lis, err := net.Listen(config.Network, config.Listen)
 
 		if err != nil {
 			glog.Fatalf("failed to listen: %v", err)

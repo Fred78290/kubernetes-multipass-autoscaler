@@ -1,6 +1,5 @@
 {
-    "address": "$IPADDR",
-    "port": 5200,
+    "address": "$CONNECTTO",
     "secret": "multipass",
     "timeout": 300,
     "config": {
