@@ -63,23 +63,27 @@ curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_
 
 sed -i 's/PasswordAuthentication/#PasswordAuthentication/g' /etc/ssh/sshd_config 
 
-mkdir -p /usr/local/bin
-cd /usr/local/bin
+mkdir -p /opt/bin
+cd /opt/bin
 curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl}
-chmod +x /usr/local/bin/kube*
+chmod +x /opt/bin/kube*
 
-curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service" | sed "s:/usr/bin:/usr/local/bin:g" > /etc/systemd/system/kubelet.service
+curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service" | sed "s:/usr/bin:/opt/bin:g" > /etc/systemd/system/kubelet.service
 mkdir -p /etc/systemd/system/kubelet.service.d
-curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf" | sed "s:/usr/bin:/usr/local/bin:g" > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf" | sed "s:/usr/bin:/opt/bin:g" > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
 
 systemctl enable kubelet
 
-echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
-export PATH=/opt/cni/bin:/usr/local/bin:\$PATH
+ln -s /opt/bin/kubeadm /usr/local/bin/kubeadm
+ln -s /opt/bin/kubelet /usr/local/bin/kubelet
+ln -s /opt/bin/kubectl /usr/local/bin/kubectl
 
-kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
+echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
+export PATH=/opt/bin:/opt/cni/bin:/opt/bin:\$PATH
+
+/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
 
 echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
 
