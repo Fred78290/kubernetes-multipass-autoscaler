@@ -10,7 +10,6 @@ CURDIR=$(dirname $0)
 export CUSTOM_IMAGE=YES
 export SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
 export KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
-export KUBERNETES_VERSION=v1.12.4
 export KUBERNETES_PASSWORD=$(uuidgen)
 export KUBECONFIG=$HOME/.kube/config
 export TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
@@ -31,8 +30,10 @@ export SCALEDOWNUNREADYTIME="1m"
 export DEFAULT_MACHINE="medium"
 export UNREMOVABLENODERECHECKTIMEOUT="1m"
 export OSDISTRO=$(uname -a)
+export TRANSPORT="unix"
+export LOWBANDWIDTH="NO"
 
-TEMP=$(getopt -o ci:k:n:p:v: --long no-custom-image,image:,ssh-key:,cni-version:,password:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
+TEMP=$(getopt -o cli:k:n:p:t:v: --long low-bandwidth,transport:,no-custom-image,image:,ssh-key:,cni-version:,password:,kubernetes-version:,max-nodes-total:,cores-total:,memory-total:,max-autoprovisioned-node-group-count:,scale-down-enabled:,scale-down-delay-after-add:,scale-down-delay-after-delete:,scale-down-delay-after-failure:,scale-down-unneeded-time:,scale-down-unready-time:,unremovable-node-recheck-timeout: -n "$0" -- "$@")
 
 eval set -- "$TEMP"
 
@@ -55,12 +56,20 @@ while true; do
 		SSH_KEY="$2"
 		shift 2
 		;;
+    -l | --low-bandwidth)
+        LOWBANDWIDTH="YES"
+        shift 1
+        ;;
 	-n | --cni-version)
 		CNI_VERSION="$2"
 		shift 2
 		;;
 	-p | --password)
 		KUBERNETES_PASSWORD="$2"
+		shift 2
+		;;
+	-t | --transport)
+		TRANSPORT="$2"
 		shift 2
 		;;
 	-v | --kubernetes-version)
@@ -123,27 +132,114 @@ while true; do
 	esac
 done
 
-RUN_CMD=$(
-	cat <<EOF
-[
-    "curl https://get.docker.com | bash",
-    "mkdir -p /opt/cni/bin",
-    "curl -L https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-amd64-${CNI_VERSION}.tgz | tar -C /opt/cni/bin -xz",
-    "mkdir -p /usr/local/bin",
-    "cd /usr/local/bin ; curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl}",
-    "chmod +x /usr/local/bin/kube*",
-    "echo \"KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'\" > /etc/default/kubelet",
-    "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service",
-    "mkdir -p /etc/systemd/system/kubelet.service.d",
-    "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/usr/local/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
-    "systemctl enable kubelet",
-    "systemctl restart kubelet",
-    "echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
-    "kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}",
-    "apt autoremove -y"
+# GRPC network endpoint
+if [ "$TRANSPORT" == "unix" ]; then
+    LISTEN="/var/run/cluster-autoscaler/grpc.sock"
+    CONNECTTO="/var/run/cluster-autoscaler/grpc.sock"
+elif [ "$TRANSPORT" == "tcp" ]; then
+    if [ "$OSDISTRO" == "Linux" ]; then
+        NET_IF=$(ip route get 1 | awk '{print $5;exit}')
+        IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
+    else
+        NET_IF=$(route get 1 | grep interface | awk '{print $2}')
+        IPADDR=$(ifconfig $NET_IF | grep "inet\s" | sed -n 1p | awk '{print $2}')
+    fi
+
+    LISTEN="${IPADDR}:5200"
+    CONNECTTO="${IPADDR}:5200"
+else
+    echo "Unknown transport: ${TRANSPORT}, should be unix or tcp"
+    exit -1
+fi
+
+echo "Transport set to:${TRANSPORT}, listen endpoint at ${LISTEN}"
+
+# Bandwidth. If low then fetch components before multipass launch, because multipass launch doesnt have timeout option control
+if [ "$LOWBANDWIDTH" == "YES" ]; then
+    echo "Low network low band width endorsed"
+
+    KUBERNETES_CACHE="${HOME}/.local/kubernetes-multipass-autoscaler/${KUBERNETES_VERSION}"
+    PACKAGE_UPGRADE="false"
+
+    MOUNTPOINTS=$(cat <<EOF
+        "$PWD/config": "/etc/cluster-autoscaler",
+        "$KUBERNETES_CACHE/cni": "/opt/cni/bin",
+        "$KUBERNETES_CACHE/kubernetes": "/opt/bin",
+        "$KUBERNETES_CACHE/docker": "/opt/docker"
+EOF
+)
+
+    if [ ! -d "$KUBERNETES_CACHE" ]; then
+        mkdir -p "${HOME}/.local/kubernetes-multipass-autoscaler/${KUBERNETES_VERSION}"
+        pushd $KUBERNETES_CACHE
+        mkdir -p docker
+        mkdir -p cni
+        curl -L https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-amd64-${CNI_VERSION}.tgz | tar -C cni -xz
+        mkdir -p kubernetes
+        pushd kubernetes
+        curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl}
+        chmod +x *
+        popd
+    fi
+
+    RUN_CMD=$(
+    cat <<EOF
+    [
+        "mkdir -p /opt/cni/bin",
+        "mkdir -p /opt/bin",
+        "curl https://get.docker.com | bash",
+        "echo \"KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'\" > /etc/default/kubelet",
+        "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service\" | sed 's:/usr/bin:/opt/bin:g' > /etc/systemd/system/kubelet.service",
+        "mkdir -p /etc/systemd/system/kubelet.service.d",
+        "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/opt/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
+        "ln -s /opt/bin/kubeadm /usr/local/bin/kubeadm",
+        "ln -s /opt/bin/kubelet /usr/local/bin/kubelet",
+        "ln -s /opt/bin/kubectl /usr/local/bin/kubectl",
+        "systemctl enable kubelet",
+        "systemctl restart kubelet",
+        "echo 'export PATH=/opt/bin:/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
+        "apt autoremove -y",
+        "echo '#!/bin/bash' > /usr/local/bin/kubeimage",
+        "echo 'for f in /opt/docker/*.tar ; do echo \"Import docker image cache \$f\" ; docker load -i \$f ; done' >> /usr/local/bin/kubeimage",
+        "chmod +x /usr/local/bin/kubeimage"
 ]
 EOF
 )
+else
+    MOUNTPOINTS=$(cat <<EOF
+        "$PWD/config": "/etc/cluster-autoscaler"
+EOF
+)
+
+    PACKAGE_UPGRADE="true"
+
+    RUN_CMD=$(
+    cat <<EOF
+    [
+        "curl https://get.docker.com | bash",
+        "mkdir -p /opt/cni/bin",
+        "curl -L https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-amd64-${CNI_VERSION}.tgz | tar -C /opt/cni/bin -xz",
+        "mkdir -p /opt/bin",
+        "cd /opt/bin ; curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl}",
+        "chmod +x /opt/bin/kube*",
+        "echo \"KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'\" > /etc/default/kubelet",
+        "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service\" | sed 's:/usr/bin:/opt/bin:g' > /etc/systemd/system/kubelet.service",
+        "mkdir -p /etc/systemd/system/kubelet.service.d",
+        "curl -sSL \"https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf\" | sed 's:/usr/bin:/opt/bin:g' > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf",
+        "ln -s /opt/bin/kubeadm /usr/local/bin/kubeadm",
+        "ln -s /opt/bin/kubelet /usr/local/bin/kubelet",
+        "ln -s /opt/bin/kubectl /usr/local/bin/kubectl",
+        "systemctl enable kubelet",
+        "systemctl restart kubelet",
+        "echo 'export PATH=/opt/bin:/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh",
+        "apt autoremove -y"
+        "echo '#!/bin/bash' > /usr/local/bin/kubeimage",
+        "echo '/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}' >> /usr/local/bin/kubeimage",
+        "chmod +x /usr/local/bin/kubeimage"
+    ]
+EOF
+)
+fi
 
 KUBERNETES_USER=$(
 	cat <<EOF
@@ -280,7 +376,7 @@ fi
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
 	echo "Launch custom masterkube instance with $TARGET_IMAGE"
 
-	cat <<EOF | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >./config/cloud-init-masterkube.yaml
+	cat <<EOF | tee ./config/cloud-init-masterkube.json | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >./config/cloud-init-masterkube.yaml
     {
         "package_update": false,
         "package_upgrade": false,
@@ -299,10 +395,10 @@ EOF
 else
 	echo "Launch standard masterkube instance"
 
-	cat <<EOF | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >./config/cloud-init-masterkube.yaml
+	cat <<EOF | tee ./config/cloud-init-masterkube.json | python2 -c "import json,sys,yaml; print yaml.safe_dump(json.load(sys.stdin), width=500, indent=4, default_flow_style=False)" >./config/cloud-init-masterkube.yaml
     {
         "package_update": true,
-        "package_upgrade": true,
+        "package_upgrade": $PACKAGE_UPGRADE,
         "runcmd": $RUN_CMD,
         "users": $KUBERNETES_USER,
         "ssh_authorized_keys": [
@@ -321,10 +417,12 @@ fi
 multipass launch -n masterkube -m 4096 -c 2 -d 10G --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
 
 # Due bug in multipass MacOS, we need to reboot manually the VM after apt upgrade
-if [ "$CUSTOM_IMAGE" != "YES" ] && [ "$OSDISTRO" != "Linux" ]; then
+if [ "$LOWBANDWIDTH" != "YES" ] && [ "$CUSTOM_IMAGE" != "YES" ] && [ "$OSDISTRO" != "Linux" ]; then
 	multipass stop masterkube
 	multipass start masterkube
 fi
+
+sudo mkdir -p /var/run/cluster-autoscaler
 
 multipass mount $PWD/bin masterkube:/masterkube/bin
 multipass mount $PWD/templates masterkube:/masterkube/templates
@@ -332,6 +430,13 @@ multipass mount $PWD/etc masterkube:/masterkube/etc
 multipass mount $PWD/cluster masterkube:/etc/cluster
 multipass mount $PWD/kubernetes masterkube:/etc/kubernetes
 multipass mount $PWD/config masterkube:/etc/cluster-autoscaler
+multipass mount /var/run/cluster-autoscaler masterkube:/var/run/cluster-autoscaler
+
+if [ "$LOWBANDWIDTH" == "YES" ]; then
+    multipass mount "$KUBERNETES_CACHE/kubernetes" masterkube:/opt/bin
+    multipass mount "$KUBERNETES_CACHE/docker" masterkube:/opt/docker
+    multipass mount "$KUBERNETES_CACHE/cni" masterkube:/opt/cni/bin
+fi
 
 echo "Prepare masterkube instance"
 
@@ -339,21 +444,14 @@ multipass shell masterkube <<EOF
 sudo usermod -aG docker multipass
 sudo usermod -aG docker kubernetes
 echo "Start kubernetes masterkube instance master node"
-sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:\$PATH; kubeadm config images pull; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
+sudo /usr/local/bin/kubeimage
+sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:\$PATH; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
 exit
 EOF
 
 MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
-
-if [ "$OSDISTRO" == "Linux" ]; then
-	NET_IF=$(ip route get 1 | awk '{print $5;exit}')
-	IPADDR=$(ip addr show $NET_IF | grep "inet\s" | tr '/' ' ' | awk '{print $2}')
-else
-	NET_IF=$(route get 1 | grep interface | awk '{print $2}')
-	IPADDR=$(ifconfig $NET_IF | grep "inet\s" | sed -n 1p | awk '{print $2}')
-fi
 
 kubectl annotate node masterkube "cluster.autoscaler.nodegroup/name=ca-grpc-multipass" "cluster.autoscaler.nodegroup/node-index=0" "cluster.autoscaler.nodegroup/autoprovision=false" "cluster-autoscaler.kubernetes.io/scale-down-disabled=true" --overwrite --kubeconfig=./cluster/config
 kubectl label nodes masterkube "cluster.autoscaler.nodegroup/name=ca-grpc-multipass" "master=true" --overwrite --kubeconfig=./cluster/config
@@ -369,9 +467,10 @@ EOF") | jq . >./config/grpc-config.json
 
 if [ "$CUSTOM_IMAGE" = "YES" ]; then
 
-	cat <<EOF | jq . >config/kubernetes-multipass-autoscaler.json
+	cat <<EOF | jq . > config/kubernetes-multipass-autoscaler.json
     {
-        "listen": "$IPADDR:5200",
+        "network": "$TRANSPORT",
+        "listen": "$LISTEN",
         "secret": "multipass",
         "minNode": $MINNODES,
         "maxNode": $MAXNODES,
@@ -413,14 +512,15 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
             ]
         },
         "mount-point": {
-            "$PWD/config": "/etc/cluster-autoscaler"
+            $MOUNTPOINTS
         }
     }
 EOF
 else
-	cat <<EOF | jq . >config/kubernetes-multipass-autoscaler.json
+	cat <<EOF | jq . > config/kubernetes-multipass-autoscaler.json
     {
-        "listen": "$IPADDR:5200",
+        "network": "$TRANSPORT",
+        "listen": "$LISTEN",
         "secret": "multipass",
         "minNode": $MINNODES,
         "maxNode": $MAXNODES,
@@ -449,7 +549,7 @@ else
         "machines": $MACHINE_DEFS,
         "cloud-init": {
             "package_update": true,
-            "package_upgrade": true,
+            "package_upgrade": $PACKAGE_UPGRADE,
             "runcmd": $RUN_CMD,
             "users": $KUBERNETES_USER,
             "ssh_authorized_keys": [
@@ -461,7 +561,7 @@ else
             $POWERSTATE
         },
         "mount-point": {
-            "$PWD/config": "/etc/cluster-autoscaler"
+            $MOUNTPOINTS
         }
     }
 EOF
@@ -480,7 +580,7 @@ fi
 
 ./bin/create-ingress-controller.sh
 ./bin/create-dashboard.sh
-./bin/create-autoscaler.sh
+#./bin/create-autoscaler.sh
 ./bin/create-helloworld.sh
 
 popd
