@@ -52,6 +52,7 @@ type MultipassServerOptionals struct {
 
 // MultipassServerConfig is contains configuration
 type MultipassServerConfig struct {
+	Network            string                            `default:"tcp" json:"network"`         // Mandatory, Network to listen (see grpc doc) to listen
 	Listen             string                            `default:"0.0.0.0:5200" json:"listen"` // Mandatory, Address to listen
 	ProviderID         string                            `json:"secret"`                        // Mandatory, secret Identifier, client must match this
 	MinNode            int                               `json:"minNode"`                       // Mandatory, Min Multipass VM
@@ -196,6 +197,13 @@ func (s *MultipassServer) doAutoProvision() error {
 				systemLabels := make(map[string]string)
 				labels := map[string]string{
 					nodeLabelGroupName: nodeGroupIdentifier,
+				}
+
+				// Default labels
+				if node.GetLabels() != nil {
+					for k, v := range node.GetLabels() {
+						labels[k] = v
+					}
 				}
 
 				glog.Infof("Auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, node.MinSize, node.MaxSize)
