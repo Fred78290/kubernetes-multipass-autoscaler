@@ -24,7 +24,6 @@ import (
 	"os"
 
 	"github.com/golang/glog"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 
 	apigrc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
 	"google.golang.org/grpc"
@@ -85,8 +84,8 @@ func main() {
 		if phSaveState == false || fileExists(phSavedState) == false {
 			phMultipassServer = &MultipassServer{
 				ResourceLimiter: &ResourceLimiter{
-					map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
-					map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
+					map[string]int64{ResourceNameCores: 1, ResourceNameMemory: 10000000},
+					map[string]int64{ResourceNameCores: 5, ResourceNameMemory: 100000000},
 				},
 				Configuration:        config,
 				Groups:               make(map[string]*MultipassNodeGroup),

@@ -13,7 +13,6 @@ import (
 
 	apigrpc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
 	apiv1 "k8s.io/api/core/v1"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 )
 
 const (
@@ -54,8 +53,8 @@ func newTestServer(nodeGroup *MultipassNodeGroup) (*MultipassServer, context.Con
 
 	s := &MultipassServer{
 		ResourceLimiter: &ResourceLimiter{
-			map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
-			map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
+			map[string]int64{ResourceNameCores: 1, ResourceNameMemory: 10000000},
+			map[string]int64{ResourceNameCores: 5, ResourceNameMemory: 100000000},
 		},
 		Groups:        map[string]*MultipassNodeGroup{},
 		Configuration: config,
@@ -354,8 +353,8 @@ func TestMultipassServer_GetResourceLimiter(t *testing.T) {
 		{
 			name: "GetResourceLimiter",
 			want: &ResourceLimiter{
-				map[string]int64{cloudprovider.ResourceNameCores: 1, cloudprovider.ResourceNameMemory: 10000000},
-				map[string]int64{cloudprovider.ResourceNameCores: 5, cloudprovider.ResourceNameMemory: 100000000},
+				map[string]int64{ResourceNameCores: 1, ResourceNameMemory: 10000000},
+				map[string]int64{ResourceNameCores: 5, ResourceNameMemory: 100000000},
 			},
 			request: &apigrpc.CloudProviderServiceRequest{
 				ProviderID: testProviderID,
