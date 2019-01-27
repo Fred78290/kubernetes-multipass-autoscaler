@@ -195,9 +195,9 @@ func (g *MultipassNodeGroup) addNodes(delta int, extras *nodeCreationExtra) erro
 			for _, node := range tempNodes {
 				delete(g.PendingNodes, node.NodeName)
 
-				if status, _ := node.statusVM(); status == MultipassNodeStateRunning {
-					if err := node.deleteVM(extras.kubeConfig); err != nil {
-						glog.Errorf(errUnableToDeleteVM, node.NodeName, err)
+				if status, _ := node.statusVM(); status != MultipassNodeStateNotCreated {
+					if e := node.deleteVM(extras.kubeConfig); e != nil {
+						glog.Errorf(errUnableToDeleteVM, node.NodeName, e)
 					}
 				}
 
