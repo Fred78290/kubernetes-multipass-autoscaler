@@ -4,9 +4,9 @@
 
 Ubuntu multipass cloud provider for kubernetes cluster autoscaler allows you to test cluster autoscaling in your deployment with Multipass.
 
-## How it works.
+## How it works
 
-This tool will drive multipass to deploy VM at the demand. The cluster autoscaler deployment use an enhanced version of cluster-autoscaler. https://github.com/Fred78290/autoscaler. This version use grpc to communicate with the cloud provider hosted outside the pod.
+This tool will drive multipass to deploy VM at the demand. The cluster autoscaler deployment use an enhanced version of cluster-autoscaler. https://github.com/Fred78290/autoscaler. This version use grpc to communicate with the cloud provider hosted outside the pod. A docker image is available here https://hub.docker.com/r/fred78290/cluster-autoscaler
 
 A sample of the cluster-autoscaler deployment is available at [examples/cluster-autoscaler.yaml](./examples/cluster-autoscaler.yaml). You must fill value between <>
 
@@ -14,7 +14,7 @@ Before you must deploy your kubernetes cluster on Multipass VM. You can do it fr
 
 ## Commandline arguments
 
-| Parameter | Description | 
+| Parameter | Description |
 | --- | --- |
 | `version` | Print the version and exit  |
 | `save`  | Tell the tool to save state in this file  |
