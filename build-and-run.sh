@@ -3,7 +3,7 @@ pushd $(dirname $0)
 
 make container
 
-[ $(uname -s) = "Darwin" ] && GOOS=darwin || GOOS=linux
+[ $(uname -s) == "Darwin" ] && GOOS=darwin || GOOS=linux
 
 ./out/multipass-autoscaler-$GOOS-amd64 \
     --config=masterkube/config/kubernetes-multipass-autoscaler.json \
