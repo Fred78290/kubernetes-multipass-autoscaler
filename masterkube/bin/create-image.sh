@@ -8,25 +8,47 @@
 
 # /usr/lib/python3/dist-packages/cloudinit/net/netplan.py
 
-TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-kubernetes-amd64.img
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
+TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
 CNI_VERSION=v0.7.1
 CACHE=~/.local/multipass/cache
-TEMP=`getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
+TEMP=$(getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@")
 eval set -- "$TEMP"
 
 # extract options and their arguments into variables.
-while true ; do
-	#echo "1:$1"
+while true; do
+    #echo "1:$1"
     case "$1" in
-        -i|--custom-image) TARGET_IMAGE="$2" ; shift 2;;
-        -k|--ssh-key) SSH_KEY=$2 ; shift 2;;
-        -n|--cni-version) CNI_VERSION=$2 ; shift 2;;
-        -p|--password) KUBERNETES_PASSWORD=$2 ; shift 2;;
-        -v|--kubernetes-version) KUBERNETES_VERSION=$2 ; shift 2;;
-        --) shift ; break ;;
-        *) echo "$1 - Internal error!" ; exit 1 ;;
+    -i | --custom-image)
+        TARGET_IMAGE="$2"
+        shift 2
+        ;;
+    -k | --ssh-key)
+        SSH_KEY=$2
+        shift 2
+        ;;
+    -n | --cni-version)
+        CNI_VERSION=$2
+        shift 2
+        ;;
+    -p | --password)
+        KUBERNETES_PASSWORD=$2
+        shift 2
+        ;;
+    -v | --kubernetes-version)
+        KUBERNETES_VERSION=$2
+        TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+        shift 2
+        ;;
+    --)
+        shift
+        break
+        ;;
+    *)
+        echo "$1 - Internal error!"
+        exit 1
+        ;;
     esac
 done
 
@@ -40,9 +62,9 @@ fi
 # Grab nameserver/domainname
 NAMESERVER=$(grep nameserver $RESOLVCONF | awk '{print $2}')
 DOMAINNAME=$(grep search $RESOLVCONF | awk '{print $2}')
-INIT_SCRIPT=prepare-k8s-bionic.sh
+INIT_SCRIPT=/tmp/prepare-k8s-bionic.sh
 
-cat > /tmp/prepare-k8s-bionic.sh <<EOF
+cat > $INIT_SCRIPT <<EOF
 #/bin/bash
 
 echo "nameserver $NAMESERVER" > /etc/resolv.conf 
@@ -63,45 +85,66 @@ curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_
 
 sed -i 's/PasswordAuthentication/#PasswordAuthentication/g' /etc/ssh/sshd_config 
 
-mkdir -p /opt/bin
-cd /opt/bin
+mkdir -p /usr/local/bin
+cd /usr/local/bin
 curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/release/${KUBERNETES_VERSION}/bin/linux/amd64/{kubeadm,kubelet,kubectl}
-chmod +x /opt/bin/kube*
+chmod +x /usr/local/bin/kube*
 
-curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service" | sed "s:/usr/bin:/opt/bin:g" > /etc/systemd/system/kubelet.service
+curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/kubelet.service" | sed "s:/usr/bin:/usr/local/bin:g" > /etc/systemd/system/kubelet.service
 mkdir -p /etc/systemd/system/kubelet.service.d
-curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf" | sed "s:/usr/bin:/opt/bin:g" > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+curl -sSL "https://raw.githubusercontent.com/kubernetes/kubernetes/${KUBERNETES_VERSION}/build/debs/10-kubeadm.conf" | sed "s:/usr/bin:/usr/local/bin:g" > /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
 
 echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
 
 systemctl enable kubelet
 
-ln -s /opt/bin/kubeadm /usr/local/bin/kubeadm
-ln -s /opt/bin/kubelet /usr/local/bin/kubelet
-ln -s /opt/bin/kubectl /usr/local/bin/kubectl
-
 echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
-export PATH=/opt/bin:/opt/cni/bin:/opt/bin:\$PATH
+export PATH=/opt/cni/bin:\$PATH
 
-/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
+/usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
 
-echo "network: {config: disabled}" > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg
+[ -f /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg ] && rm /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
+rm /etc/netplan/*
+rm /etc/machine-id
+cloud-init clean
+rm /var/log/cloud-ini*
+rm /var/log/syslog
 
-cat > /etc/systemd/network/20-dhcp.network <<SHELL
-[Match]
-Name=en*
+cat > /lib/systemd/system/systemd-machine-id.service <<SHELL
+#  This file is part of systemd.
+#
+#  systemd is free software; you can redistribute it and/or modify it
+#  under the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation; either version 2.1 of the License, or
+#  (at your option) any later version.
 
-[Network]
-DHCP=yes
+[Unit]
+Description=Regenerate machine-id if missing
+Documentation=man:systemd-machine-id(1)
+DefaultDependencies=no
+Conflicts=shutdown.target
+After=systemd-remount-fs.service
+Before=systemd-sysusers.service sysinit.target shutdown.target
+ConditionPathIsReadWrite=/etc
+ConditionFirstBoot=yes
 
-[DHCP]
-UseMTU=true
-UseDomains=true
-ClientIdentifier=mac
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/systemd-machine-id-setup
+StandardOutput=tty
+StandardInput=tty
+StandardError=tty
+
+[Install]
+WantedBy=sysinit.target
 SHELL
 
-echo "cloud-init	cloud-init/datasources	multiselect	NoCloud,None" | debconf-set-selections
-dpkg-reconfigure cloud-init
+chown root:root /lib/systemd/system/systemd-machine-id.service
+
+systemctl enable systemd-machine-id.service
+
+exit 0
 EOF
 
 chmod +x /tmp/prepare-k8s-bionic.sh
@@ -115,12 +158,7 @@ fi
 cp $CACHE/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
 
 qemu-img resize $TARGET_IMAGE 5G
-sudo virt-customize --network -a $TARGET_IMAGE --timezone Europe/Paris
-sudo virt-customize --network -a $TARGET_IMAGE --root-password password:$KUBERNETES_PASSWORD
-sudo virt-customize --network -a $TARGET_IMAGE --copy-in /tmp/$INIT_SCRIPT:/usr/local/bin
-sudo virt-customize --network -a $TARGET_IMAGE --run-command /usr/local/bin/$INIT_SCRIPT
-sudo virt-customize --network -a $TARGET_IMAGE --firstboot-command "/bin/rm /etc/machine-id; /bin/systemd-machine-id-setup"
-sudo virt-sysprep -a $TARGET_IMAGE
+sudo virt-sysprep --network -a $TARGET_IMAGE --timezone Europe/Paris --root-password password:$KUBERNETES_PASSWORD --copy-in $INIT_SCRIPT:/tmp --run-command $INIT_SCRIPT
 
 rm /tmp/prepare-k8s-bionic.sh
 
