@@ -26,7 +26,8 @@ else
 endif
 
 deps:
-	go get github.com/tools/godep
+	wget "https://raw.githubusercontent.com/Fred78290/autoscaler/master/cluster-autoscaler/cloudprovider/grpc/grpc.proto" -O grpc/grpc.proto
+	protoc -I . -I vendor grpc/grpc.proto --go_out=plugins=grpc:.
 
 build:
 	$(ENVVAR) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="-X main.phVersion=$(VERSION) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/multipass-autoscaler-$(GOOS)-$(GOARCH) ${TAGS_FLAG}
@@ -59,7 +60,7 @@ build-in-docker: docker-builder
 release: build-in-docker execute-release
 	@echo "Full in-docker release ${TAG}${FOR_PROVIDER} completed"
 
-container: clean build-in-docker
+container: clean deps build-in-docker
 	@echo "Created in-docker image ${TAG}${FOR_PROVIDER}"
 
 test-in-docker: clean docker-builder
