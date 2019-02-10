@@ -33,6 +33,8 @@ pid="$!"
 
 echo -n "$pid" > config/multipass-autoscaler.pid
 
+echo "multipass-autoscaler-$GOOS-amd64 running with PID:$pid"
+
 deploy service-account
 deploy cluster-role
 deploy role
