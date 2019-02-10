@@ -592,7 +592,7 @@ fi
 
 ./bin/create-ingress-controller.sh
 ./bin/create-dashboard.sh
-#./bin/create-autoscaler.sh
+./bin/create-autoscaler.sh
 ./bin/create-helloworld.sh
 
 popd
