@@ -22,3 +22,5 @@ masterkube/config/*
 masterkube/etc/ssl/*
 
 debug
+
+kubernetes-multipass-autoscaler
