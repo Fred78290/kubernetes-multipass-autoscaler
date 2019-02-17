@@ -1,4 +1,4 @@
-# Copyright 2017 The Kubernetes Authors. All rights reserved
+# Copyright 2019 Frederic Boltz Author. All rights reserved
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,14 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.11.2
-LABEL maintainer="Marcin Wielgus <mwielgus@google.com>"
+FROM golang:1.11.5
+LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
 ENV GOPATH /gopath/
 ENV PATH $GOPATH/bin:$PATH
 
-RUN apt-get update && apt-get --yes install libseccomp-dev
-RUN go version
-RUN go get github.com/tools/godep
-RUN godep version
+RUN apt-get update && apt-get --yes install libseccomp-dev && \
+    go version && \
+    go get -u github.com/kardianos/govendor && \
+    go get -u github.com/vmware/govmomi/vcsim && \
+    govendor -version
+
 CMD ["/bin/bash"]
