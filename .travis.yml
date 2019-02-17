@@ -17,6 +17,7 @@ jobs:
       if: tag IS present OR commit_message =~ /\/ci-deploy/
       services: docker
       install: true
+      script: make -e REGISTRY=fred78290 -e TAG=$TRAVIS_TAG container
       deploy:
         provider: releases
         api_key: $GITHUB_OAUTH_TOKEN
