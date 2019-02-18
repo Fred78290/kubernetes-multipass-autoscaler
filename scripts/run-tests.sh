@@ -1,4 +1,4 @@
 #!/bin/bash
-govendor fetch +missing +external
+#govendor fetch -v +missing +external
 
 echo "Nothing to test"
