@@ -24,7 +24,7 @@ else
 endif
 
 deps:
-	govendor fetch +missing +external
+	govendor fetch -v +missing +external
 #	wget "https://raw.githubusercontent.com/Fred78290/autoscaler/master/cluster-autoscaler/cloudprovider/grpc/grpc.proto" -O grpc/grpc.proto
 #	protoc -I . -I vendor grpc/grpc.proto --go_out=plugins=grpc:.
 
