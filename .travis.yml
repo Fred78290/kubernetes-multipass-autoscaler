@@ -11,14 +11,13 @@ addons:
 cache:
   directories:
     - '$HOME/.sonar/cache'
-    - 'Fred78290/kubernetes-multipass-autoscaler/vendor'
+    - 'vendor'
 jobs:
   include:
     - stage: build
       services: docker
       install: true
       script:
-        - echo $PWD
         - make -e REGISTRY=fred78290 -e TAG=dev container
         - sonar-scanner
     - stage: test
