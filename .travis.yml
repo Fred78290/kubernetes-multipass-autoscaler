@@ -11,6 +11,7 @@ addons:
 cache:
   directories:
     - '$HOME/.sonar/cache'
+    - '$HOME/Fred78290/build/kubernetes-multipass-autoscaler/vendor'
 jobs:
   include:
     - stage: build
