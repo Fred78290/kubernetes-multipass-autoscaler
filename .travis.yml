@@ -10,8 +10,8 @@ addons:
       secure: "RZ2//25khVk7Z/m+8llTsNEFgP1lBrCwMRENSRAo6wOQvepiTDAZfoc9BtSvKwZ78Y8kS4eRDp3lFuH1zK6lBHXmkuLmZzK67ulXaE4pIbD4//b3jkgBrL7jOBTR+5IVEMudZrs42SFFZj4LODYao0yM+YXMfkDimUP8LAV1KMViHjiU023Db9z3IMXQPW5G+E1zojuquxEtajdGa7SRS/+PopfUedDzmMmTyV/axV7x9q9RfhEH+R0CoOlySwsFW5u+PX+hNOMrAMF5YyrWT0rJpbv2DO7JWY0X/fSrU7uOny8Sl3xcPDW6FeP9C7BFUMsZ0wWfRAUpXCQ1glblfpuqta8FZnNDMsYF5yoj7WpBITM0RJcKIEDyzVYZAwBebP0qMBFxOilLHjk0KClJdmHt/i/Tbylj8HjBfopNm/Lw0gOOVMXCmn2oi069exqP/YYcvk8xa9mHm0DLBi2AMpqAjwPcPQwAIfoOgL+oBifnDY2iphsiUOC4r45pJLvbgZHyToyk8pNePr8j9kD+YWOH6J4a1xb4tTEDL2NlsIh5dsN+tV5Zvaiw+md9PI3C8SOknwQEgSx5uDPDe3UoYjztPpmzkSOozrT7Fkd04TpyzmOeOlNPmCb5kEhipM59LNr+y2ZyroEoqSsBdLHz+HhIGO2LDayI11S4hMr9kEk="
 cache:
   directories:
-    - '$HOME/.sonar/cache'
-    - 'vendor'
+    - $HOME/.sonar/cache
+    - vendor
 jobs:
   include:
     - stage: build
