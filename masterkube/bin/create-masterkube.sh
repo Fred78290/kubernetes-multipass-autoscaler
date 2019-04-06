@@ -357,7 +357,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
 EOF
 		echo "Create multipass VM to create the custom image"
 
-		multipass launch -n imagecreator -m 4096 -c 4 --cloud-init=./config/imagecreator.yaml bionic
+		multipass launch -n imagecreator -m 4096M -c 4 --cloud-init=./config/imagecreator.yaml bionic
 
 		ROOT_IMAGE=$(dirname $TARGET_IMAGE)
 
@@ -426,7 +426,7 @@ EOF
 	LAUNCH_IMAGE_URL="bionic"
 fi
 
-multipass launch -n masterkube -m 4096 -c 2 -d 10G --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
+multipass launch -n masterkube -m 4096M -c 2 -d 10G --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
 
 # Due bug in multipass MacOS, we need to reboot manually the VM after apt upgrade
 if [ "$LOWBANDWIDTH" != "YES" ] && [ "$CUSTOM_IMAGE" != "YES" ] && [ "$OSDISTRO" != "Linux" ]; then
