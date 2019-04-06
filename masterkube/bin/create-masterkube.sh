@@ -452,14 +452,13 @@ fi
 
 echo "Prepare masterkube instance"
 
-multipass shell masterkube <<EOF
-sudo usermod -aG docker multipass
-sudo usermod -aG docker kubernetes
+multipass exec masterkube -- sudo usermod -aG docker multipass
+multipass exec masterkube -- sudo usermod -aG docker kubernetes
+multipass exec masterkube -- sudo /bin/bash -c /usr/local/bin/kubeimage
+
 echo "Start kubernetes masterkube instance master node"
-sudo /usr/local/bin/kubeimage
-sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:\$PATH; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
-exit
-EOF
+
+multipass exec masterkube -- sudo bash -c "export PATH=/opt/bin:/opt/cni/bin:/masterkube/bin:\$PATH; create-cluster.sh flannel ens3 '$KUBERNETES_VERSION' '$PROVIDERID'"
 
 MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
