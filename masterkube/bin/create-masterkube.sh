@@ -313,7 +313,7 @@ if [ ! -f ./etc/ssl/privkey.pem ]; then
 	chmod 644 ./etc/ssl/*
 fi
 
-export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text <./etc/ssl/cert.pem | grep 'Subject: CN' | tr '=' ' ' | awk '{print $3}' | sed 's/\*\.//g')
+export DOMAIN_NAME=$(openssl x509 -noout -subject -in ./etc/ssl/cert.pem | awk -F= '{print $NF}' | sed -e 's/^[ \t]*//' | sed 's/\*\.//g')
 
 # Because multipass on MacOS doesn't support local image, we can't use custom image
 if [ "$OSDISTRO" == "Linux" ]; then
