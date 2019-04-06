@@ -11,7 +11,7 @@
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
 TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
-CNI_VERSION=v0.7.1
+CNI_VERSION=v0.7.5
 CACHE=~/.local/multipass/cache
 TEMP=$(getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@")
 eval set -- "$TEMP"
