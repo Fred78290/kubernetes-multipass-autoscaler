@@ -52,7 +52,7 @@ while true; do
     esac
 done
 
-# Hack because virt-customize doesn't recopy the good /etc/resolv.conf due dnsmasq
+# Hack because virt-customize doesn't recopy the good /etc/resolv.conf due systemd-resolved.service
 if [ -f /run/systemd/resolve/resolv.conf ]; then
     RESOLVCONF=/run/systemd/resolve/resolv.conf
 else
