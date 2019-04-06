@@ -393,7 +393,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ]; then
         ],
         "runcmd": [
             "echo '#!/bin/bash' > /usr/local/bin/kubeimage",
-            "echo '/opt/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}' >> /usr/local/bin/kubeimage",
+            "echo '/usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}' >> /usr/local/bin/kubeimage",
             "chmod +x /usr/local/bin/kubeimage"
         ],
         "group": [
