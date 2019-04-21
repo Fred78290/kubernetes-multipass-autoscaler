@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
 	apigrpc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
+	"github.com/Fred78290/kubernetes-vmware-autoscaler/constantes"
 	"github.com/golang/glog"
 	apiv1 "k8s.io/api/core/v1"
 )
@@ -562,6 +564,38 @@ func (s *MultipassServer) GetResourceLimiter(ctx context.Context, request *apigr
 				MaxLimits: s.ResourceLimiter.MaxLimits,
 			},
 		},
+	}, nil
+}
+
+// GPULabel returns the label added to nodes with GPU resource.
+func (s *MultipassServer) GPULabel(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.GPULabelReply, error) {
+	glog.V(5).Infof("Call server GPULabel: %v", request)
+
+	if request.GetProviderID() != s.Configuration.ProviderID {
+		glog.Errorf(constantes.ErrMismatchingProvider)
+		return nil, fmt.Errorf(constantes.ErrMismatchingProvider)
+	}
+
+	return &apigrpc.GPULabelReply{
+		Response: &apigrpc.GPULabelReply_Gpulabel{
+			Gpulabel: "",
+		},
+	}, nil
+}
+
+// GetAvailableGPUTypes return all available GPU types cloud provider supports.
+func (s *MultipassServer) GetAvailableGPUTypes(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.GetAvailableGPUTypesReply, error) {
+	log.Printf("Call server GetAvailableGPUTypes: %v", request)
+
+	if request.GetProviderID() != s.Configuration.ProviderID {
+		glog.Errorf(constantes.ErrMismatchingProvider)
+		return nil, fmt.Errorf(constantes.ErrMismatchingProvider)
+	}
+
+	gpus := make(map[string]string)
+
+	return &apigrpc.GetAvailableGPUTypesReply{
+		AvailableGpuTypes: gpus,
 	}, nil
 }
 
