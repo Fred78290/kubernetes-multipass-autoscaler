@@ -222,12 +222,12 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 	var out string
 	var err error
 	var arg = []string{
-		"kubectl",
-		"get",
-		"nodes",
-		"--output",
-		"json",
-		"--kubeconfig",
+		kubectlCommandLine,
+		getArgument,
+		nodesArgument,
+		outputArgument,
+		jsonArgument,
+		kubeConfigArgument,
 		kubeconfig,
 	}
 
@@ -287,15 +287,15 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 						}
 
 						arg = []string{
-							"kubectl",
-							"annotate",
-							"node",
+							kubectlCommandLine,
+							annotateArgument,
+							nodeArgument,
 							nodeInfo.Name,
 							fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
 							fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
 							fmt.Sprintf("%s=%d", annotationNodeIndex, node.NodeIndex),
-							"--overwrite",
-							"--kubeconfig",
+							overwriteArgument,
+							kubeConfigArgument,
 							kubeconfig,
 						}
 
@@ -304,13 +304,13 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 						}
 
 						arg = []string{
-							"kubectl",
-							"label",
-							"nodes",
+							kubectlCommandLine,
+							labelArgument,
+							nodesArgument,
 							nodeInfo.Name,
 							fmt.Sprintf("%s=%s", nodeLabelGroupName, g.NodeGroupIdentifier),
-							"--overwrite",
-							"--kubeconfig",
+							overwriteArgument,
+							kubeConfigArgument,
 							kubeconfig,
 						}
 

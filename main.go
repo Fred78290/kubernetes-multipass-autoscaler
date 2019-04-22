@@ -81,7 +81,7 @@ func main() {
 			KubeAdmExtraArguments: config.KubeAdm.ExtraArguments,
 		}
 
-		if phSaveState == false || fileExists(phSavedState) == false {
+		if !phSaveState || !fileExists(phSavedState) {
 			phMultipassServer = &MultipassServer{
 				ResourceLimiter: &ResourceLimiter{
 					map[string]int64{ResourceNameCores: 1, ResourceNameMemory: 10000000},

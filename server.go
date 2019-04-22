@@ -94,37 +94,47 @@ func (s *MultipassServer) generateNodeGroupName() string {
 	return fmt.Sprintf("ng-%d", time.Now().Unix())
 }
 
-func (s *MultipassServer) newNodeGroup(nodeGroupID string, minNodeSize, maxNodeSize int32, machineType string, labels, systemLabels map[string]string, autoProvision bool) (*MultipassNodeGroup, error) {
+type newNodeGroupArgument struct {
+	nodeGroupID   string
+	minNodeSize   int32
+	maxNodeSize   int32
+	machineType   string
+	labels        map[string]string
+	systemLabels  map[string]string
+	autoProvision bool
+}
 
-	machine := s.Configuration.Machines[machineType]
+func (s *MultipassServer) newNodeGroup(arg newNodeGroupArgument) (*MultipassNodeGroup, error) {
+
+	machine := s.Configuration.Machines[arg.machineType]
 
 	if machine == nil {
-		return nil, fmt.Errorf(errMachineTypeNotFound, machineType)
+		return nil, fmt.Errorf(errMachineTypeNotFound, arg.machineType)
 	}
 
-	if nodeGroup := s.Groups[nodeGroupID]; nodeGroup != nil {
-		glog.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
+	if nodeGroup := s.Groups[arg.nodeGroupID]; nodeGroup != nil {
+		glog.Errorf(errNodeGroupAlreadyExists, arg.nodeGroupID)
 
-		return nil, fmt.Errorf(errNodeGroupAlreadyExists, nodeGroupID)
+		return nil, fmt.Errorf(errNodeGroupAlreadyExists, arg.nodeGroupID)
 	}
 
-	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node lables:%v, %v", nodeGroupID, minNodeSize, maxNodeSize, machineType, labels, systemLabels)
+	glog.Infof("New node group, ID:%s minSize:%d, maxSize:%d, machineType:%s, node lables:%v, %v", arg.nodeGroupID, arg.minNodeSize, arg.maxNodeSize, arg.machineType, arg.labels, arg.systemLabels)
 
 	nodeGroup := &MultipassNodeGroup{
 		ServiceIdentifier:   s.Configuration.ProviderID,
-		NodeGroupIdentifier: nodeGroupID,
+		NodeGroupIdentifier: arg.nodeGroupID,
 		Machine:             machine,
 		Status:              NodegroupNotCreated,
 		PendingNodes:        make(map[string]*MultipassNode),
 		Nodes:               make(map[string]*MultipassNode),
-		MinNodeSize:         int(minNodeSize),
-		MaxNodeSize:         int(maxNodeSize),
-		NodeLabels:          labels,
-		SystemLabels:        systemLabels,
-		AutoProvision:       autoProvision,
+		MinNodeSize:         int(arg.minNodeSize),
+		MaxNodeSize:         int(arg.maxNodeSize),
+		NodeLabels:          arg.labels,
+		SystemLabels:        arg.systemLabels,
+		AutoProvision:       arg.autoProvision,
 	}
 
-	s.Groups[nodeGroupID] = nodeGroup
+	s.Groups[arg.nodeGroupID] = nodeGroup
 
 	return nodeGroup, nil
 }
@@ -198,12 +208,8 @@ func (s *MultipassServer) doAutoProvision() error {
 	var err error
 
 	for _, node := range s.NodesDefinition {
-		nodeGroupIdentifier := node.GetNodeGroupID()
-
-		if len(nodeGroupIdentifier) > 0 {
-			ng = s.Groups[nodeGroupIdentifier]
-
-			if ng == nil {
+		if nodeGroupIdentifier := node.GetNodeGroupID(); len(nodeGroupIdentifier) > 0 {
+			if ng = s.Groups[nodeGroupIdentifier]; ng == nil {
 				systemLabels := make(map[string]string)
 				labels := map[string]string{
 					nodeLabelGroupName: nodeGroupIdentifier,
@@ -218,12 +224,20 @@ func (s *MultipassServer) doAutoProvision() error {
 
 				glog.Infof("Auto provision for nodegroup:%s, minSize:%d, maxSize:%d", nodeGroupIdentifier, node.MinSize, node.MaxSize)
 
-				if ng, err = s.newNodeGroup(nodeGroupIdentifier, node.MinSize, node.MaxSize, s.Configuration.DefaultMachineType, labels, systemLabels, true); err == nil {
-					if ng, err = s.createNodeGroup(nodeGroupIdentifier); err == nil {
-						if node.GetIncludeExistingNode() {
-							if err = ng.autoDiscoveryNodes(true, s.Configuration.KubeCtlConfig); err == nil {
-								return err
-							}
+				arg := newNodeGroupArgument{
+					nodeGroupIdentifier,
+					node.MinSize,
+					node.MaxSize,
+					s.Configuration.DefaultMachineType,
+					labels,
+					systemLabels,
+					true,
+				}
+
+				if ng, err = s.newNodeGroup(arg); err == nil {
+					if ng, err = s.createNodeGroup(nodeGroupIdentifier); err == nil && node.GetIncludeExistingNode() {
+						if err = ng.autoDiscoveryNodes(true, s.Configuration.KubeCtlConfig); err == nil {
+							return err
 						}
 					}
 				}
@@ -524,7 +538,17 @@ func (s *MultipassServer) NewNodeGroup(ctx context.Context, request *apigrpc.New
 
 	labels[nodeLabelGroupName] = nodeGroupIdentifier
 
-	nodeGroup, err := s.newNodeGroup(nodeGroupIdentifier, request.GetMinNodeSize(), request.GetMaxNodeSize(), request.GetMachineType(), labels, systemLabels, false)
+	arg := newNodeGroupArgument{
+		nodeGroupIdentifier,
+		request.GetMinNodeSize(),
+		request.GetMaxNodeSize(),
+		request.GetMachineType(),
+		labels,
+		systemLabels,
+		false,
+	}
+
+	nodeGroup, err := s.newNodeGroup(arg)
 
 	if err != nil {
 		glog.Errorf(errUnableToCreateNodeGroup, nodeGroupIdentifier, err)
@@ -1265,23 +1289,21 @@ func (s *MultipassServer) Belongs(ctx context.Context, request *apigrpc.BelongsR
 
 	var belong bool
 
-	if nodeGroup != nil {
-		if nodeGroup.NodeGroupIdentifier == request.GetNodeGroupID() {
-			nodeName, err := nodeNameFromProviderID(s.Configuration.ProviderID, providerID)
+	if nodeGroup != nil && nodeGroup.NodeGroupIdentifier == request.GetNodeGroupID() {
+		nodeName, err := nodeNameFromProviderID(s.Configuration.ProviderID, providerID)
 
-			if err != nil {
-				return &apigrpc.BelongsReply{
-					Response: &apigrpc.BelongsReply_Error{
-						Error: &apigrpc.Error{
-							Code:   cloudProviderError,
-							Reason: err.Error(),
-						},
+		if err != nil {
+			return &apigrpc.BelongsReply{
+				Response: &apigrpc.BelongsReply_Error{
+					Error: &apigrpc.Error{
+						Code:   cloudProviderError,
+						Reason: err.Error(),
 					},
-				}, nil
-			}
-
-			belong = nodeGroup.Nodes[nodeName] != nil
+				},
+			}, nil
 		}
+
+		belong = nodeGroup.Nodes[nodeName] != nil
 	}
 
 	return &apigrpc.BelongsReply{
