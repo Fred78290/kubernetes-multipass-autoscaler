@@ -3,6 +3,8 @@
 os: linux
 dist: xenial
 language: minimal
+git:
+  depth: false
 addons:
   sonarcloud:
     organization: fred78290-github
