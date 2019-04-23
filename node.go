@@ -351,10 +351,7 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 
 	glog.Infof("Launch VM:%s for nodegroup: %s", vm.NodeName, extras.nodegroupID)
 
-	if vm.AutoProvisionned == false {
-		err = fmt.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
-	} else {
-
+	if vm.AutoProvisionned {
 		if vm.State != MultipassNodeStateNotCreated {
 			err = fmt.Errorf(errVMAlreadyCreated, vm.NodeName)
 		} else if cloudInitFile, err = vm.writeCloudFile(extras); err == nil {
@@ -415,6 +412,8 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 				}
 			}
 		}
+	} else {
+		err = fmt.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
 	if err == nil {
@@ -521,9 +520,7 @@ func (vm *MultipassNode) deleteVM(kubeconfig string) error {
 	var err error
 	var state MultipassNodeState
 
-	if vm.AutoProvisionned == false {
-		err = fmt.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
-	} else {
+	if vm.AutoProvisionned {
 		state, err = vm.statusVM()
 
 		if err == nil {
@@ -574,6 +571,8 @@ func (vm *MultipassNode) deleteVM(kubeconfig string) error {
 				err = fmt.Errorf(errDeleteVMFailed, vm.NodeName, err)
 			}
 		}
+	} else {
+		err = fmt.Errorf(errVMNotProvisionnedByMe, vm.NodeName)
 	}
 
 	if err == nil {

@@ -291,7 +291,7 @@ func (g *MultipassNodeGroup) autoDiscoveryNodes(scaleDownDisabled bool, kubeconf
 							annotateArgument,
 							nodeArgument,
 							nodeInfo.Name,
-							fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && node.AutoProvisionned == false)),
+							fmt.Sprintf("%s=%s", annotationScaleDownDisabled, strconv.FormatBool(scaleDownDisabled && !node.AutoProvisionned)),
 							fmt.Sprintf("%s=%s", annotationNodeAutoProvisionned, strconv.FormatBool(node.AutoProvisionned)),
 							fmt.Sprintf("%s=%d", annotationNodeIndex, node.NodeIndex),
 							overwriteArgument,
