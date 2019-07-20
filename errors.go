@@ -61,4 +61,5 @@ const (
 	errVMNotProvisionnedByMe          = "The VM: %s is not provisionned by me"
 	errFailedToLoadServerState        = "Failed to load server state, reason: %v"
 	errFailedToSaveServerState        = "Failed to save server state, reason: %v"
+	errVMStateUndefined               = "VM state %s is not defined:%s"
 )

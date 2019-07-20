@@ -616,6 +616,7 @@ func (vm *MultipassNode) statusVM() (MultipassNodeState, error) {
 			vm.State = MultipassNodeStateDeleted
 		default:
 			vm.State = MultipassNodeStateUndefined
+			glog.Infof(errVMStateUndefined, vm.NodeName, vmInfo.State)
 		}
 
 		vm.Addresses = vmInfo.Ipv4
