@@ -139,10 +139,8 @@ done
 
 # GRPC network endpoint
 if [ "$TRANSPORT" == "unix" ]; then
-    sudo mkdir -p /var/run/cluster-autoscaler
-    sudo chown 777 /var/run/cluster-autoscaler
-    LISTEN="/var/run/cluster-autoscaler/grpc.sock"
-    CONNECTTO="${TRANSPORT}:${LISTEN}"
+    LISTEN="${PWD}/config/grpc.sock"
+    CONNECTTO="${TRANSPORT}:/etc/cluster-autoscaler/grpc.sock"
 elif [ "$TRANSPORT" == "tcp" ]; then
     if [ "$OSDISTRO" == "Linux" ]; then
         NET_IF=$(ip route get 1 | awk '{print $5;exit}')
