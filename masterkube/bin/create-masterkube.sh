@@ -137,6 +137,19 @@ while true; do
 	esac
 done
 
+function multipass_mount {
+    echo -n "Mount point $1 to $2"
+while :
+do
+	echo -n "."
+	multipass mount $1 $2 > /dev/null 2>&1 && break
+	sleep 1
+done
+    echo
+}
+
+pushd $CURDIR/../
+
 # GRPC network endpoint
 if [ "$TRANSPORT" == "unix" ]; then
     LISTEN="${PWD}/config/grpc.sock"
@@ -150,7 +163,7 @@ elif [ "$TRANSPORT" == "tcp" ]; then
         IPADDR=$(ifconfig $NET_IF | grep "inet\s" | sed -n 1p | awk '{print $2}')
     fi
 
-    LISTEN="0:0:0:0:${PORT}"
+    LISTEN="0.0.0.0:${PORT}"
     CONNECTTO="${IPADDR}:${PORT}"
 else
     echo "Unknown transport: ${TRANSPORT}, should be unix or tcp"
@@ -295,8 +308,6 @@ MACHINE_DEFS=$(
 EOF
 )
 
-pushd $CURDIR/../
-
 [ -d config ] || mkdir -p config
 [ -d cluster ] || mkdir -p cluster
 [ -d kubernetes ] || mkdir -p kubernetes
@@ -359,9 +370,9 @@ EOF
 
 		ROOT_IMAGE=$(dirname $TARGET_IMAGE)
 
-		multipass mount $PWD/bin imagecreator:/masterkube/bin
-		multipass mount $HOME/.local/multipass/cache/ imagecreator:/home/multipass/.local/multipass/cache/
-		multipass mount $ROOT_IMAGE imagecreator:$ROOT_IMAGE
+		multipass_mount $PWD/bin imagecreator:/masterkube/bin
+		multipass_mount $HOME/.local/multipass/cache/ imagecreator:/home/multipass/.local/multipass/cache/
+		multipass_mount $ROOT_IMAGE imagecreator:$ROOT_IMAGE
 
 		echo "Create multipass preconfigured image (could take a long)"
 
@@ -432,20 +443,17 @@ if [ "$LOWBANDWIDTH" != "YES" ] && [ "$CUSTOM_IMAGE" != "YES" ] && [ "$OSDISTRO"
 	multipass start masterkube
 fi
 
-sudo mkdir -p /var/run/cluster-autoscaler
-
-multipass mount $PWD/bin masterkube:/masterkube/bin
-multipass mount $PWD/templates masterkube:/masterkube/templates
-multipass mount $PWD/etc masterkube:/masterkube/etc
-multipass mount $PWD/cluster masterkube:/etc/cluster
-multipass mount $PWD/kubernetes masterkube:/etc/kubernetes
-multipass mount $PWD/config masterkube:/etc/cluster-autoscaler
-multipass mount /var/run/cluster-autoscaler masterkube:/var/run/cluster-autoscaler
+multipass_mount $PWD/bin masterkube:/masterkube/bin
+multipass_mount $PWD/templates masterkube:/masterkube/templates
+multipass_mount $PWD/etc masterkube:/masterkube/etc
+multipass_mount $PWD/cluster masterkube:/etc/cluster
+multipass_mount $PWD/kubernetes masterkube:/etc/kubernetes
+multipass_mount $PWD/config masterkube:/etc/cluster-autoscaler
 
 if [ "$LOWBANDWIDTH" == "YES" ]; then
-    multipass mount "$KUBERNETES_CACHE/kubernetes" masterkube:/opt/bin
-    multipass mount "$KUBERNETES_CACHE/docker" masterkube:/opt/docker
-    multipass mount "$KUBERNETES_CACHE/cni" masterkube:/opt/cni/bin
+    multipass_mount "$KUBERNETES_CACHE/kubernetes" masterkube:/opt/bin
+    multipass_mount "$KUBERNETES_CACHE/docker" masterkube:/opt/docker
+    multipass_mount "$KUBERNETES_CACHE/cni" masterkube:/opt/cni/bin
 fi
 
 echo "Prepare masterkube instance"
