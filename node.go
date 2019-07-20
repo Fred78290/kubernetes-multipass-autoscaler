@@ -607,7 +607,7 @@ func (vm *MultipassNode) statusVM() (MultipassNodeState, error) {
 	if vmInfo := vmInfos.Info[vm.NodeName]; vmInfo != nil {
 		vm.Addresses = vmInfo.Ipv4
 
-		switch vmInfo.State {
+		switch strings.ToUpper(vmInfo.State) {
 		case "RUNNING":
 			vm.State = MultipassNodeStateRunning
 		case "STOPPED":
