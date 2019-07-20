@@ -30,7 +30,7 @@ export SCALEDOWNUNREADYTIME="1m"
 export DEFAULT_MACHINE="medium"
 export UNREMOVABLENODERECHECKTIMEOUT="1m"
 export OSDISTRO=$(uname -s)
-export TRANSPORT="unix"
+export TRANSPORT="tcp"
 export LOWBANDWIDTH="NO"
 export PORT=5200
 
