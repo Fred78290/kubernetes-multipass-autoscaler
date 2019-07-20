@@ -513,7 +513,7 @@ if [ "$CUSTOM_IMAGE" = "YES" ]; then
             "package_upgrade": false,
             "users": $KUBERNETES_USER,
             "runcmd": [
-                "kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}"
+                "kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}"
             ],
             "ssh_authorized_keys": [
                 "$SSH_KEY"
