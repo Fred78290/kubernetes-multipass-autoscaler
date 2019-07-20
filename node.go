@@ -325,8 +325,6 @@ func (vm *MultipassNode) writeCloudFile(extras *nodeCreationExtra) (*os.File, er
 		cloudInitFile, err = os.Create(fName)
 
 		if err == nil {
-			defer os.Remove(fName)
-
 			if b, err = yaml.Marshal(extras.cloudInit); err == nil {
 				if _, err = cloudInitFile.Write(b); err != nil {
 					err = fmt.Errorf(errCloudInitWriteError, err)
@@ -336,6 +334,10 @@ func (vm *MultipassNode) writeCloudFile(extras *nodeCreationExtra) (*os.File, er
 			}
 		} else {
 			err = fmt.Errorf(errTempFile, err)
+		}
+
+		if err != nil {
+			os.Remove(fName)
 		}
 	}
 
