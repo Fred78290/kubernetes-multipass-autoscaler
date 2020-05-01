@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/Fred78290/kubernetes-multipass-autoscaler/constantes"
 	apigrpc "github.com/Fred78290/kubernetes-multipass-autoscaler/grpc"
-	"github.com/Fred78290/kubernetes-vmware-autoscaler/constantes"
 	"github.com/golang/glog"
 	apiv1 "k8s.io/api/core/v1"
 )
