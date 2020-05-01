@@ -12,16 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM golang:1.12.1
+FROM golang:latest
 LABEL maintainer="Frederic Boltz <frederic.boltz@gmail.com>"
 
 ENV GOPATH /gopath/
 ENV PATH $GOPATH/bin:$PATH
 
 RUN apt-get update && apt-get --yes install libseccomp-dev && \
-    go version && \
-    go get -u github.com/kardianos/govendor && \
-    go get -u github.com/vmware/govmomi/vcsim && \
-    govendor -version
+    go version
 
 CMD ["/bin/bash"]
