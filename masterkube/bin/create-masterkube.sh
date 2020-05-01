@@ -9,11 +9,11 @@ CURDIR=$(dirname $0)
 
 export CUSTOM_IMAGE=YES
 export SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-export KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
+export KUBERNETES_VERSION=v1.17.5
 export KUBERNETES_PASSWORD=$(uuidgen)
 export KUBECONFIG=$HOME/.kube/config
 export TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
-export CNI_VERSION="v0.7.5"
+export CNI_VERSION="v0.8.5"
 export PROVIDERID="multipass://ca-grpc-multipass/object?type=node&name=masterkube"
 export MINNODES=0
 export MAXNODES=5

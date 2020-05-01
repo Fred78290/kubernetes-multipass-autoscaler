@@ -16,3 +16,7 @@ require (
 	gopkg.in/yaml.v2 v2.2.8
 	k8s.io/api v0.18.2
 )
+
+replace google.golang.org/grpc => google.golang.org/grpc v1.26.0
+
+replace k8s.io/api => k8s.io/api v0.17.5
