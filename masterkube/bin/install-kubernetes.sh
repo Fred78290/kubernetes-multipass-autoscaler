@@ -18,7 +18,7 @@ interface "eth0" {
 EOF
 
 if [ "x$KUBERNETES_VERSION" == "x" ]; then
-	RELEASE="$(curl -sSL https://dl.k8s.io/release/stable.txt)"
+	RELEASE=v1.15.11
 else
 	RELEASE=$KUBERNETES_VERSION
 fi
