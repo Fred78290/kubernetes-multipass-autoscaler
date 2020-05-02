@@ -13,7 +13,7 @@ export KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 export KUBERNETES_PASSWORD=$(uuidgen)
 export KUBECONFIG=$HOME/.kube/config
 export TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
-export CNI_VERSION="v0.7.5"
+export CNI_VERSION="v0.8.5"
 export PROVIDERID="multipass://ca-grpc-multipass/object?type=node&name=masterkube"
 export MINNODES=0
 export MAXNODES=5
@@ -458,7 +458,7 @@ fi
 
 echo "Prepare masterkube instance"
 
-multipass exec masterkube -- sudo usermod -aG docker multipass
+multipass exec masterkube -- sudo usermod -aG docker ubuntu
 multipass exec masterkube -- sudo usermod -aG docker kubernetes
 multipass exec masterkube -- sudo /bin/bash -c /usr/local/bin/kubeimage
 
