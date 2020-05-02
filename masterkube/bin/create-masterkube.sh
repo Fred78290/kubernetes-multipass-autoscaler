@@ -458,7 +458,7 @@ fi
 
 echo "Prepare masterkube instance"
 
-multipass exec masterkube -- sudo usermod -aG docker multipass
+multipass exec masterkube -- sudo usermod -aG docker ubuntu
 multipass exec masterkube -- sudo usermod -aG docker kubernetes
 multipass exec masterkube -- sudo /bin/bash -c /usr/local/bin/kubeimage
 
