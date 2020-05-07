@@ -347,7 +347,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
 	if [ "$OSDISTRO" == "Linux" ]; then
 		echo "Create multipass preconfigured image"
 
-		create-image.sh --password=$KUBERNETES_PASSWORD \
+		./bin/create-image.sh --password=$KUBERNETES_PASSWORD \
 			--cni-version=$CNI_VERSION \
 			--custom-image=$TARGET_IMAGE \
 			--kubernetes-version=$KUBERNETES_VERSION
