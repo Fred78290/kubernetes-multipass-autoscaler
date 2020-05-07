@@ -68,7 +68,7 @@ KUBERNETES_MINOR_RELEASE=$(echo -n $KUBERNETES_VERSION | tr '.' ' ' | awk '{ pri
 cat > $INIT_SCRIPT <<EOF
 #/bin/bash
 
-echo "nameserver $NAMESERVER" > /etc/resolv.conf 
+echo "nameserver $NAMESERVER" > /etc/resolv.conf
 echo "search $DOMAINNAME" >> /etc/resolv.conf 
 
 export DEBIAN_FRONTEND=noninteractive
@@ -76,7 +76,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get upgrade -y
 apt-get dist-upgrade -y
-apt-get install jq socat -y
+apt-get install jq socat conntrack -y
 
 apt-get autoremove -y
 
@@ -109,12 +109,31 @@ else
 fi
 
 # Setup Kube DNS resolver
-mkdir /etc/systemd/resolved.conf.d/
-cat > /etc/systemd/resolved.conf.d/kubernetes.conf <<SHELL
-[Resolve]
-DNS=10.96.0.10
-Domains=cluster.local
-SHELL
+#mkdir -p /etc/systemd
+#cat > /etc/systemd/resolved.conf <<SHELL
+#  This file is part of systemd.
+#
+#  systemd is free software; you can redistribute it and/or modify it
+#  under the terms of the GNU Lesser General Public License as published by
+#  the Free Software Foundation; either version 2.1 of the License, or
+#  (at your option) any later version.
+#
+# Entries in this file show the compile time defaults.
+# You can change settings by editing this file.
+# Defaults can be restored by simply deleting this file.
+#
+# See resolved.conf(5) for details
+
+#[Resolve]
+#DNS=10.96.0.10
+#FallbackDNS=
+#Domains=~cluster.local
+#LLMNR=no
+#MulticastDNS=no
+#DNSSEC=no
+#Cache=yes
+#DNSStubListener=yes
+#SHELL
 
 mkdir -p /opt/cni/bin
 curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
@@ -223,6 +242,6 @@ cp $CACHE/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
 qemu-img resize $TARGET_IMAGE 5G
 sudo virt-sysprep --network -a $TARGET_IMAGE --timezone Europe/Paris --root-password password:$KUBERNETES_PASSWORD --copy-in $INIT_SCRIPT:/tmp --run-command $INIT_SCRIPT
 
-rm /tmp/prepare-k8s-bionic.sh
+#rm /tmp/prepare-k8s-bionic.sh
 
 echo "Created image $TARGET_IMAGE with kubernetes version $KUBERNETES_VERSION"
