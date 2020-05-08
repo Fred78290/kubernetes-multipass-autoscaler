@@ -9,7 +9,7 @@ CURDIR=$(dirname $0)
 
 export CUSTOM_IMAGE=YES
 export SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-export KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
+export KUBERNETES_VERSION=v1.18.2
 export KUBERNETES_PASSWORD=$(uuidgen)
 export KUBECONFIG=$HOME/.kube/config
 export TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
@@ -347,7 +347,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
 	if [ "$OSDISTRO" == "Linux" ]; then
 		echo "Create multipass preconfigured image"
 
-		create-image.sh --password=$KUBERNETES_PASSWORD \
+		./bin/create-image.sh --password=$KUBERNETES_PASSWORD \
 			--cni-version=$CNI_VERSION \
 			--custom-image=$TARGET_IMAGE \
 			--kubernetes-version=$KUBERNETES_VERSION

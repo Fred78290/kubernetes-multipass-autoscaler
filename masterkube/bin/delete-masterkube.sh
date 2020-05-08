@@ -20,6 +20,8 @@ if [ -f config/multipass-autoscaler.pid ]; then
     kill $(cat config/multipass-autoscaler.pid)
 fi
 
+multipass delete masterkube  -p &> /dev/null
+
 find cluster ! -name '*.md' -type f -exec rm -f "{}" "+"
 find config ! -name '*.md' -type f -exec rm -f "{}" "+"
 find kubernetes ! -name '*.md' -type f -exec rm -f "{}" "+"
