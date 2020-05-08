@@ -105,7 +105,7 @@ func main() {
 			}
 		}
 
-		glog.Infof("Start listening server on %s", config.Listen)
+		glog.Infof("Start listening server %s on %s", phVersion, config.Listen)
 
 		lis, err := net.Listen(config.Network, config.Listen)
 
