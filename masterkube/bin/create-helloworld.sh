@@ -6,6 +6,7 @@ pushd $CURDIR/../
 export K8NAMESPACE=kube-public
 export ETC_DIR=./config/deployment/helloworld
 export KUBERNETES_TEMPLATE=./templates/helloworld
+export REWRITE_TARGET='/$1'
 
 if [ -z "$DOMAIN_NAME" ]; then
     export DOMAIN_NAME=$(openssl x509 -noout -fingerprint -text < ./etc/ssl/cert.pem | grep 'Subject: CN =' | awk '{print $4}' | sed 's/\*\.//g')
