@@ -115,7 +115,7 @@ data:
         kubeAdmExtraArguments:
             - --ignore-preflight-errors=All
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cluster-autoscaler
@@ -136,7 +136,7 @@ spec:
     spec:
       serviceAccountName: cluster-autoscaler
       containers:
-        - image: fred78290/cluster-autoscaler:v1.13.1
+        - image: fred78290/cluster-autoscaler:v1.16.9
           name: cluster-autoscaler
           resources:
             limits:
@@ -147,7 +147,7 @@ spec:
               memory: 300Mi
           command:
             - ./cluster-autoscaler
-            - --v=4
+            - -v=4
             - --stderrthreshold=info
             - --cloud-provider=grpc
             - --cloud-config=/etc/cluster-autoscaler/grpc.conf
