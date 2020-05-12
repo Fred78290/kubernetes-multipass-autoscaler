@@ -3,7 +3,7 @@
 TARGET_IMAGE=$HOME/.local/multipass/cache/builder-kubernetes-amd64.img
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
-CNI_VERSION=v0.7.5
+CNI_VERSION=v0.8.5
 
 TEMP=`getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@"`
 eval set -- "$TEMP"
