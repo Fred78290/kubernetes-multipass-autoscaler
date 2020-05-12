@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -609,7 +608,7 @@ func (s *MultipassServer) GPULabel(ctx context.Context, request *apigrpc.CloudPr
 
 // GetAvailableGPUTypes return all available GPU types cloud provider supports.
 func (s *MultipassServer) GetAvailableGPUTypes(ctx context.Context, request *apigrpc.CloudProviderServiceRequest) (*apigrpc.GetAvailableGPUTypesReply, error) {
-	log.Printf("Call server GetAvailableGPUTypes: %v", request)
+	glog.V(5).Infof("Call server GetAvailableGPUTypes: %v", request)
 
 	if request.GetProviderID() != s.Configuration.ProviderID {
 		glog.Errorf(constantes.ErrMismatchingProvider)
