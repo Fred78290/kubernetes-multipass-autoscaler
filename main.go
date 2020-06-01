@@ -115,6 +115,8 @@ func main() {
 
 		server := grpc.NewServer()
 
+		defer server.Stop()
+
 		apigrc.RegisterCloudProviderServiceServer(server, phMultipassServer)
 		apigrc.RegisterNodeGroupServiceServer(server, phMultipassServer)
 		apigrc.RegisterPricingModelServiceServer(server, phMultipassServer)
