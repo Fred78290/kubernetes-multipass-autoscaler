@@ -11,7 +11,7 @@
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
 TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
-CNI_VERSION=v0.8.5
+CNI_VERSION=v0.8.6
 CACHE=~/.local/multipass/cache
 TEMP=$(getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@")
 eval set -- "$TEMP"
@@ -240,7 +240,7 @@ fi
 cp $CACHE/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
 
 qemu-img resize $TARGET_IMAGE 5G
-sudo virt-sysprep --network -a $TARGET_IMAGE --timezone Europe/Paris --root-password password:$KUBERNETES_PASSWORD --copy-in $INIT_SCRIPT:/tmp --run-command $INIT_SCRIPT
+sudo virt-sysprep --network -a $TARGET_IMAGE --timezone Europe/Paris --root-password password:$KUBERNETES_PASSWORD --copy-in $INIT_SCRIPT:/tmp --run-command "/bin/bash $INIT_SCRIPT > /var/log/prepare-k8s-bionic.log"
 
 #rm /tmp/prepare-k8s-bionic.sh
 
