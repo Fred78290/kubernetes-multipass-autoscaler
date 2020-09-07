@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -99,6 +100,7 @@ func Test_multipassNode_launchVM(t *testing.T) {
 					nodeLabels:    nodeLabels,
 					systemLabels:  make(map[string]string),
 					vmprovision:   config.VMProvision,
+					cacheDir:      os.UserCacheDir(),
 				}
 
 				if err := vm.launchVM(extras); (err != nil) != tt.wantErr {
@@ -207,6 +209,7 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 			nodeLabels:    testNodeGroup.NodeLabels,
 			systemLabels:  testNodeGroup.SystemLabels,
 			vmprovision:   config.VMProvision,
+			cacheDir:      os.UserCacheDir(),
 		}
 
 		tests := []struct {

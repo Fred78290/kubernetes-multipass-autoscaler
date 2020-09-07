@@ -32,7 +32,7 @@ Some needed file are located in:
 | `etc/ssl`  | Your CERT for https. Autosigned will be generated if empty  |
 | `template`  | Templates files to deploy pod & service |
 
-The first thing done by this script is to create a Ubuntu-18.04.1 image with kubernetes and docker installed. The image will be located here [~/.local/multipass/cache](file://~/.local/multipass/cache)
+The first thing done by this script is to create a Ubuntu-18.04.1 image with kubernetes and docker installed. The image will be located here [images](./images)
 
 Next step will be to launch a multipass VM and create a master node. It will also deploy a dashboard at the URL https://masterkube-dashboard.@your-domain@/
 
