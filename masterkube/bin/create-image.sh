@@ -7,25 +7,32 @@
 # have the same IP with different mac address.
 
 # /usr/lib/python3/dist-packages/cloudinit/net/netplan.py
-
+CURDIR=$(dirname $0)
 KUBERNETES_VERSION=$(curl -sSL https://dl.k8s.io/release/stable.txt)
 KUBERNETES_PASSWORD=$(uuidgen)
-TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
+SSH_PRIV_KEY="~/.ssh/id_rsa"
 CNI_VERSION=v0.8.6
-CACHE=~/.local/multipass/cache
-TEMP=$(getopt -o i:k:n:p:v: --long custom-image:,ssh-key:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@")
+CACHE=~/.cache
+TEMP=$(getopt -o i:k:n:p:v: --long ssh-pub-key:,ssh-priv-key:,custom-image:,cni-version:,password:,kubernetes-version: -n "$0" -- "$@")
 eval set -- "$TEMP"
+
+PACKER_LOG=0
 
 # extract options and their arguments into variables.
 while true; do
     #echo "1:$1"
     case "$1" in
-    -i | --custom-image)
-        TARGET_IMAGE="$2"
+    --ssh-pub-key)
+        SSH_KEY="$(cat $2)"
         shift 2
         ;;
-    -k | --ssh-key)
-        SSH_KEY=$2
+    --ssh-priv-key)
+        SSH_PRIV_KEY="$2"
+        shift 2
+        ;;
+    -i | --custom-image)
+        TARGET_IMAGE="$2"
         shift 2
         ;;
     -n | --cni-version)
@@ -38,7 +45,6 @@ while true; do
         ;;
     -v | --kubernetes-version)
         KUBERNETES_VERSION=$2
-        TARGET_IMAGE=$HOME/.local/multipass/cache/bionic-k8s-$KUBERNETES_VERSION-amd64.img
         shift 2
         ;;
     --)
@@ -52,24 +58,25 @@ while true; do
     esac
 done
 
-# Hack because virt-customize doesn't recopy the good /etc/resolv.conf due systemd-resolved.service
-if [ -f /run/systemd/resolve/resolv.conf ]; then
-    RESOLVCONF=/run/systemd/resolve/resolv.conf
-else
-    RESOLVCONF=/etc/resolv.conf
+if [ -z $TARGET_IMAGE ]; then
+    TARGET_IMAGE=$CURDIR/../images/bionic-k8s-$KUBERNETES_VERSION-amd64.img
 fi
 
 # Grab nameserver/domainname
-NAMESERVER=$(grep nameserver $RESOLVCONF | awk '{print $2}')
-DOMAINNAME=$(grep search $RESOLVCONF | awk '{print $2}')
 INIT_SCRIPT=/tmp/prepare-k8s-bionic.sh
 KUBERNETES_MINOR_RELEASE=$(echo -n $KUBERNETES_VERSION | tr '.' ' ' | awk '{ print $2 }')
 
+sudo apt install qemu qemu-kvm -y
+
+if [ -z $(command -v packer) ]; then
+    curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+    sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+    sudo apt-get update
+    sudo apt-get install packer -y
+fi
+
 cat > $INIT_SCRIPT <<EOF
 #/bin/bash
-
-echo "nameserver $NAMESERVER" > /etc/resolv.conf
-echo "search $DOMAINNAME" >> /etc/resolv.conf 
 
 export DEBIAN_FRONTEND=noninteractive
 
@@ -81,10 +88,9 @@ apt-get install jq socat conntrack -y
 apt-get autoremove -y
 
 # Setup daemon.
-if [ $KUBERNETES_MINOR_RELEASE -ge 14 ]; then
-    mkdir -p /etc/docker
+mkdir -p /etc/docker
 
-    cat > /etc/docker/daemon.json <<SHELL
+cat > /etc/docker/daemon.json <<SHELL
 {
     "exec-opts": [
         "native.cgroupdriver=systemd"
@@ -97,43 +103,14 @@ if [ $KUBERNETES_MINOR_RELEASE -ge 14 ]; then
 }
 SHELL
 
-    curl https://get.docker.com | bash
+curl https://get.docker.com | bash
 
-    mkdir -p /etc/systemd/system/docker.service.d
+mkdir -p /etc/systemd/system/docker.service.d
 
-    # Restart docker.
-    systemctl daemon-reload
-    systemctl restart docker
-else
-    curl https://get.docker.com | bash
-fi
-
-# Setup Kube DNS resolver
-#mkdir -p /etc/systemd
-#cat > /etc/systemd/resolved.conf <<SHELL
-#  This file is part of systemd.
-#
-#  systemd is free software; you can redistribute it and/or modify it
-#  under the terms of the GNU Lesser General Public License as published by
-#  the Free Software Foundation; either version 2.1 of the License, or
-#  (at your option) any later version.
-#
-# Entries in this file show the compile time defaults.
-# You can change settings by editing this file.
-# Defaults can be restored by simply deleting this file.
-#
-# See resolved.conf(5) for details
-
-#[Resolve]
-#DNS=10.96.0.10
-#FallbackDNS=
-#Domains=~cluster.local
-#LLMNR=no
-#MulticastDNS=no
-#DNSSEC=no
-#Cache=yes
-#DNSStubListener=yes
-#SHELL
+# Restart docker.
+systemctl daemon-reload
+systemctl enable docker
+systemctl restart docker
 
 mkdir -p /opt/cni/bin
 curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" | tar -C /opt/cni/bin -xz
@@ -147,7 +124,7 @@ chmod +x /usr/local/bin/kube*
 
 mkdir -p /etc/systemd/system/kubelet.service.d
 
-echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
+echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255'" > /etc/default/kubelet
 
 cat > /etc/systemd/system/kubelet.service <<SHELL
 [Unit]
@@ -185,63 +162,37 @@ export PATH=/opt/cni/bin:\$PATH
 
 /usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
 
-[ -f /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg ] && rm /etc/cloud/cloud.cfg.d/50-curtin-networking.cfg
-rm /etc/netplan/*
-rm /etc/machine-id
-cloud-init clean
-rm /var/log/cloud-ini*
-rm /var/log/syslog
-
-cat > /lib/systemd/system/systemd-machine-id.service <<SHELL
-#  This file is part of systemd.
-#
-#  systemd is free software; you can redistribute it and/or modify it
-#  under the terms of the GNU Lesser General Public License as published by
-#  the Free Software Foundation; either version 2.1 of the License, or
-#  (at your option) any later version.
-
-[Unit]
-Description=Regenerate machine-id if missing
-Documentation=man:systemd-machine-id(1)
-DefaultDependencies=no
-Conflicts=shutdown.target
-After=systemd-remount-fs.service
-Before=systemd-sysusers.service sysinit.target shutdown.target
-ConditionPathIsReadWrite=/etc
-ConditionFirstBoot=yes
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/systemd-machine-id-setup
-StandardOutput=tty
-StandardInput=tty
-StandardError=tty
-
-[Install]
-WantedBy=sysinit.target
-SHELL
-
-chown root:root /lib/systemd/system/systemd-machine-id.service
-
-systemctl enable systemd-machine-id.service
-
+echo "kubeadm installed"
 exit 0
 EOF
 
 chmod +x /tmp/prepare-k8s-bionic.sh
 
-[ -d $CACHE ] || mkdir -p $CACHE
+mkdir -p $CACHE/packer/cloud-data
 
-if [ ! -f $CACHE/bionic-server-cloudimg-amd64.img ]; then
-    wget https://cloud-images.ubuntu.com/bionic/current/bionic-server-cloudimg-amd64.img -O $CACHE/bionic-server-cloudimg-amd64.img
-fi
+echo -n > $CACHE/packer/cloud-data/meta-data
+cat >  $CACHE/packer/cloud-data/user-data <<EOF
+#cloud-config
+ssh_pwauth: true
+users:
+  - name: packer
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: users, admin
+    ssh_authorized_keys:
+      - $SSH_KEY
+    lock_passwd: true
+apt:
+    preserve_sources_list: true
+package_update: false
+EOF
 
-cp $CACHE/bionic-server-cloudimg-amd64.img $TARGET_IMAGE
+ISO_CHECKSUM=$(curl -s "http://cloud-images.ubuntu.com/releases/bionic/release/MD5SUMS" | grep "ubuntu-18.04-server-cloudimg-amd64.img" | awk '{print $1}')
+cp $CURDIR/../templates/packer/template.json $CACHE/packer/template.json
+pushd $CACHE/packer
+packer build -var SSH_PRIV_KEY="$SSH_PRIV_KEY" -var ISO_CHECKSUM="md5:$ISO_CHECKSUM" -var INIT_SCRIPT="$INIT_SCRIPT" -var KUBERNETES_PASSWORD="$KUBERNETES_PASSWORD" template.json
+mv output-qemu/packer-qemu $TARGET_IMAGE
+popd
 
-qemu-img resize $TARGET_IMAGE 5G
-sudo virt-sysprep --network -a $TARGET_IMAGE --timezone Europe/Paris --root-password password:$KUBERNETES_PASSWORD --copy-in $INIT_SCRIPT:/tmp --run-command "/bin/bash $INIT_SCRIPT > /var/log/prepare-k8s-bionic.log"
-
-#rm /tmp/prepare-k8s-bionic.sh
+rm -rf $CACHE/packer
 
 echo "Created image $TARGET_IMAGE with kubernetes version $KUBERNETES_VERSION"
