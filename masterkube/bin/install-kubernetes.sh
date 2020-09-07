@@ -34,9 +34,9 @@ curl -L --remote-name-all https://storage.googleapis.com/kubernetes-release/rele
 chmod +x {kubeadm,kubelet,kubectl}
 
 if [ -f /run/systemd/resolve/resolv.conf ]; then
-	echo "KUBELET_EXTRA_ARGS='--resolv-conf=/run/systemd/resolve/resolv.conf --fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
+	echo "KUBELET_EXTRA_ARGS='--resolv-conf=/run/systemd/resolve/resolv.conf --fail-swap-on=false --read-only-port=10255'" > /etc/default/kubelet
 else
-	echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true'" > /etc/default/kubelet
+	echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255'" > /etc/default/kubelet
 fi
 
 mkdir -p /etc/systemd/system/kubelet.service.d

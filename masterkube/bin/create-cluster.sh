@@ -29,7 +29,7 @@ fi
 if [ ! -f /etc/kubernetes/kubelet.conf ]; then
 
     if [ -z "$(grep 'provider-id' /etc/default/kubelet)" ]; then
-        echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --feature-gates=VolumeSubpathEnvExpansion=true --provider-id=${PROVIDERID}'" > /etc/default/kubelet
+        echo "KUBELET_EXTRA_ARGS='--fail-swap-on=false --read-only-port=10255 --provider-id=${PROVIDERID}'" > /etc/default/kubelet
         systemctl restart kubelet
     fi
 
