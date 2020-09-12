@@ -1,0 +1,64 @@
+{
+    "builders": [
+        {
+            "type": "qemu",
+            "accelerator": "kvm",
+            "iso_url": "http://cloud-images.ubuntu.com/releases/bionic/release/ubuntu-18.04-server-cloudimg-amd64.img",
+            "iso_checksum": "{{ user `ISO_CHECKSUM` }}",
+            "disk_image": true,
+            "disk_size": 5120,
+            "disk_interface": "virtio-scsi",
+            "disk_discard": "unmap",
+            "ssh_username": "packer",
+            "ssh_password": "packerpassword",
+            "ssh_private_key_file": "{{user `SSH_PRIV_KEY`}}",
+            "http_directory": "cloud-data",
+            "qemuargs": [
+                [
+                    "-smbios",
+                    "type=1,serial=ds=nocloud-net;instance-id=packer;seedfrom=http://{{ .HTTPIP }}:{{ .HTTPPort }}/"
+                ]
+            ],
+            "use_default_display": true
+        }
+    ],
+    "provisioners": [
+        {
+            "type": "file",
+            "source": "{{ user `INIT_SCRIPT` }}",
+            "destination": "{{ user `INIT_SCRIPT` }}"
+        },
+        {
+            "type": "shell",
+            "execute_command": "sudo sh -c '{{ .Vars }} {{ .Path }}'",
+            "remote_folder": "/tmp",
+            "inline": [
+                "/bin/bash {{ user `INIT_SCRIPT` }}"
+            ]
+        },
+        {
+            "type": "shell",
+            "execute_command": "sudo sh -c '{{ .Vars }} {{ .Path }}'",
+            "remote_folder": "/tmp",
+            "inline": [
+                "/usr/bin/apt-get clean",
+                "rm -r /etc/apparmor.d/cache/* /etc/apparmor.d/cache/.features /etc/netplan/50-cloud-init.yaml /etc/ssh/ssh_host* /etc/sudoers.d/90-cloud-init-users",
+                "/usr/bin/truncate --size 0 /etc/machine-id",
+                "/usr/bin/gawk -i inplace '/PasswordAuthentication/ { gsub(/yes/, \"no\") }; { print }' /etc/ssh/sshd_config",
+                "rm -rf /root/.ssh",
+                "rm -f /snap/README",
+                "find /usr/share/netplan -name __pycache__ -exec rm -r {} +",
+                "rm -rf /var/cache/pollinate/seeded /var/cache/snapd/* /var/cache/motd-news",
+                "rm -rf /var/lib/cloud /var/lib/dbus/machine-id /var/lib/private /var/lib/systemd/timers /var/lib/systemd/timesync /var/lib/systemd/random-seed",
+                "rm -f /var/lib/ubuntu-release-upgrader/release-upgrade-available",
+                "rm -f /var/lib/update-notifier/fsck-at-reboot /var/lib/update-notifier/hwe-eol",
+                "find /var/log -type f -exec rm -f {} +",
+                "rm -r /tmp/* /tmp/.*-unix /var/tmp/*",
+                "for i in group gshadow passwd shadow subuid subgid; do rm -f /etc/$i-; sed -i '/packer/d' /etc/$i; done",
+                "rm -rf /home/packer",
+                "/bin/sync",
+                "/sbin/fstrim -v /"
+            ]
+        }
+    ]
+}

@@ -38,10 +38,20 @@ var phSaveState bool
 
 func main() {
 	var config MultipassServerConfig
+	var tmpDir string
+	var err error
+	var file *os.File
+	var cacheStats os.FileInfo
+
+	if tmpDir, err = os.UserCacheDir(); err != nil {
+		glog.Fatalf("Unable to find user cache", err)
+	}
 
 	versionPtr := flag.Bool("version", false, "Give the version")
 	savePtr := flag.String("save", "", "The file to persists the server")
 	configPtr := flag.String("config", "/etc/default/multipass-cluster-autoscaler.json", "The config for the server")
+	cachePtr := flag.String("cache-dir", tmpDir, "The cache directory")
+
 	flag.Parse()
 
 	if *versionPtr {
@@ -52,7 +62,15 @@ func main() {
 			phSaveState = true
 		}
 
-		file, err := os.Open(*configPtr)
+		if cacheStats, err = os.Lstat(*cachePtr); err != nil {
+			glog.Fatalf("failed to find cache dir:%s, error:%v", *cachePtr, err)
+		}
+
+		if cacheStats.IsDir() == false {
+			glog.Fatalf("declared cache dir:%s, is not a directory", *cachePtr)
+		}
+
+		file, err = os.Open(*configPtr)
 		if err != nil {
 			glog.Fatalf("failed to open config file:%s, error:%v", *configPtr, err)
 		}
@@ -105,7 +123,9 @@ func main() {
 			}
 		}
 
-		glog.Infof("Start listening server on %s", config.Listen)
+		phMultipassServer.CacheDir = *cachePtr
+
+		glog.Infof("Start listening server %s on %s", phVersion, config.Listen)
 
 		lis, err := net.Listen(config.Network, config.Listen)
 

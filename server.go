@@ -87,6 +87,7 @@ type MultipassServer struct {
 	KubeAdmConfiguration *apigrpc.KubeAdmConfig         `json:"kubeadm"`
 	NodesDefinition      []*apigrpc.NodeGroupDef        `json:"nodedefs"`
 	AutoProvision        bool                           `json:"auto"`
+	CacheDir             string                         `json:"cache"`
 }
 
 func (s *MultipassServer) generateNodeGroupName() string {
@@ -185,6 +186,7 @@ func (s *MultipassServer) createNodeGroup(nodeGroupID string) (*MultipassNodeGro
 				nodeLabels:    nodeGroup.NodeLabels,
 				systemLabels:  nodeGroup.SystemLabels,
 				vmprovision:   s.Configuration.VMProvision,
+				cacheDir:      s.CacheDir,
 			}
 
 			if err := nodeGroup.addNodes(nodeGroup.MinNodeSize, extras); err != nil {
@@ -818,6 +820,7 @@ func (s *MultipassServer) IncreaseSize(ctx context.Context, request *apigrpc.Inc
 		nodeLabels:    nodeGroup.NodeLabels,
 		systemLabels:  nodeGroup.SystemLabels,
 		vmprovision:   s.Configuration.VMProvision,
+		cacheDir:      s.CacheDir,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
@@ -994,6 +997,7 @@ func (s *MultipassServer) DecreaseTargetSize(ctx context.Context, request *apigr
 		nodeLabels:    nodeGroup.NodeLabels,
 		systemLabels:  nodeGroup.SystemLabels,
 		vmprovision:   s.Configuration.VMProvision,
+		cacheDir:      s.CacheDir,
 	}
 
 	err := nodeGroup.setNodeGroupSize(newSize, extras)
