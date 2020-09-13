@@ -9,7 +9,7 @@ CURDIR=$(dirname $0)
 
 export CUSTOM_IMAGE=YES
 export SSH_KEY=$(cat ~/.ssh/id_rsa.pub)
-export KUBERNETES_VERSION=v1.19.0
+export KUBERNETES_VERSION=v1.19.1
 export KUBERNETES_PASSWORD=$(uuidgen)
 export KUBECONFIG=$HOME/.kube/config
 export CNI_VERSION="v0.8.6"
