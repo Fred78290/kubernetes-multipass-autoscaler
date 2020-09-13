@@ -2,14 +2,14 @@
 
 CNI=flannel
 NET_IF==$(ip route get 1|awk '{print $5;exit}')
-KUBERNETES_VERION=
+KUBERNETES_VERSION=
 DRY_RUN=false
 CLUSTER_DIR=/etc/cluster
 PROVIDERID=
 
 [ -z "$1" ] || CNI=$1
 [ -z "$2" ] || NET_IF=$2
-[ -z "$3" ] || KUBERNETES_VERION=$3
+[ -z "$3" ] || KUBERNETES_VERSION=$3
 [ -z "$4" ] || PROVIDERID=$4
 
 # Check if interface exists, else take inet default gateway
@@ -20,8 +20,8 @@ mkdir -p $CLUSTER_DIR
 
 echo -n "$IPADDR:6443" > $CLUSTER_DIR/manager-ip
 
-if [ "x$KUBERNETES_VERION" != "x" ]; then
-    K8_OPTIONS="--token-ttl 0 --ignore-preflight-errors=All --apiserver-advertise-address $IPADDR --kubernetes-version $KUBERNETES_VERION"
+if [ "x$KUBERNETES_VERSION" != "x" ]; then
+    K8_OPTIONS="--token-ttl 0 --ignore-preflight-errors=All --apiserver-advertise-address $IPADDR --kubernetes-version $KUBERNETES_VERSION"
 else
     K8_OPTIONS="--token-ttl 0 --ignore-preflight-errors=All --apiserver-advertise-address $IPADDR"
 fi
