@@ -160,7 +160,7 @@ systemctl enable kubelet
 echo 'export PATH=/opt/cni/bin:\$PATH' >> /etc/profile.d/apps-bin-path.sh
 export PATH=/opt/cni/bin:\$PATH
 
-/usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERION}
+/usr/local/bin/kubeadm config images pull --kubernetes-version=${KUBERNETES_VERSION}
 
 echo "kubeadm installed"
 exit 0
