@@ -3,10 +3,10 @@
     "kind": "Deployment",
     "metadata": {
         "labels": {
-            "helm.sh/chart": "ingress-nginx-2.0.3",
+            "helm.sh/chart": "ingress-nginx-2.13.0",
             "app.kubernetes.io/name": "ingress-nginx",
             "app.kubernetes.io/instance": "ingress-nginx",
-            "app.kubernetes.io/version": "0.32.0",
+            "app.kubernetes.io/version": "0.35.0",
             "app.kubernetes.io/managed-by": "Helm",
             "app.kubernetes.io/component": "controller"
         },
@@ -37,7 +37,7 @@
                 "containers": [
                     {
                         "name": "controller",
-                        "image": "quay.io/kubernetes-ingress-controller/nginx-ingress-controller:0.32.0",
+                        "image": "k8s.gcr.io/ingress-nginx/controller:v0.35.0",
                         "imagePullPolicy": "IfNotPresent",
                         "lifecycle": {
                             "preStop": {
@@ -58,7 +58,7 @@
                             "--healthz-port=10254",
                             "--http-port=80",
                             "--https-port=443",
-                            "--configmap=ingress-nginx/ingress-nginx-controller",
+                            "--configmap=$K8NAMESPACE/ingress-nginx-controller",
                             "--validating-webhook=:8443",
                             "--validating-webhook-certificate=/usr/local/certificates/cert",
                             "--validating-webhook-key=/usr/local/certificates/key",

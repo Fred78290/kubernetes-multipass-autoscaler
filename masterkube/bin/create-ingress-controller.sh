@@ -20,12 +20,12 @@ EOF") | jq . > $ETC_DIR/$1.json
 kubectl apply -f $ETC_DIR/$1.json --kubeconfig=./cluster/config
 }
 
-deploy namespace
-deploy clusterrole
-deploy clusterrolebinding
-deploy class
-deploy tcp-services-configmap
-deploy udp-services-configmap
+deploy essentials/namespace
+deploy essentials/clusterrole
+deploy essentials/clusterrolebinding
+deploy essentials/class
+deploy essentials/tcp-services-configmap
+deploy essentials/udp-services-configmap
 
 deploy default-backend/deployement
 deploy default-backend/service

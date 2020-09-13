@@ -3,10 +3,10 @@
     "kind": "RoleBinding",
     "metadata": {
         "labels": {
-            "helm.sh/chart": "ingress-nginx-2.0.3",
+            "helm.sh/chart": "ingress-nginx-2.13.0",
             "app.kubernetes.io/name": "ingress-nginx",
             "app.kubernetes.io/instance": "ingress-nginx",
-            "app.kubernetes.io/version": "0.32.0",
+            "app.kubernetes.io/version": "0.35.0",
             "app.kubernetes.io/managed-by": "Helm",
             "app.kubernetes.io/component": "controller"
         },
