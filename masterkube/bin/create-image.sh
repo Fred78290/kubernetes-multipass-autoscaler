@@ -1,6 +1,6 @@
 #/bin/bash
 
-# This script customize bionic-server-cloudimg-amd64.img to include docker+kubernetes
+# This script customize focal-server-cloudimg-amd64.img to include docker+kubernetes
 # Before running this script, you must install some elements with the command below
 # sudo apt install qemu-kvm libvirt-clients libvirt-daemon-system bridge-utils virt-manager
 # This process disable netplan and use old /etc/network/interfaces because I don't now why each VM instance running the customized image
@@ -59,11 +59,11 @@ while true; do
 done
 
 if [ -z $TARGET_IMAGE ]; then
-    TARGET_IMAGE=$CURDIR/../images/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+    TARGET_IMAGE=$CURDIR/../images/focal-k8s-$KUBERNETES_VERSION-amd64.img
 fi
 
 # Grab nameserver/domainname
-INIT_SCRIPT=/tmp/prepare-k8s-bionic.sh
+INIT_SCRIPT=/tmp/prepare-k8s-focal.sh
 KUBERNETES_MINOR_RELEASE=$(echo -n $KUBERNETES_VERSION | tr '.' ' ' | awk '{ print $2 }')
 
 sudo apt install qemu qemu-kvm -y
@@ -166,7 +166,7 @@ echo "kubeadm installed"
 exit 0
 EOF
 
-chmod +x /tmp/prepare-k8s-bionic.sh
+chmod +x /tmp/prepare-k8s-focal.sh
 
 mkdir -p $CACHE/packer/cloud-data
 
@@ -186,7 +186,7 @@ apt:
 package_update: false
 EOF
 
-ISO_CHECKSUM=$(curl -s "http://cloud-images.ubuntu.com/releases/bionic/release/MD5SUMS" | grep "ubuntu-18.04-server-cloudimg-amd64.img" | awk '{print $1}')
+ISO_CHECKSUM=$(curl -s "http://cloud-images.ubuntu.com/releases/focal/release/MD5SUMS" | grep "ubuntu-18.04-server-cloudimg-amd64.img" | awk '{print $1}')
 cp $CURDIR/../templates/packer/template.json $CACHE/packer/template.json
 pushd $CACHE/packer
 packer build -var SSH_PRIV_KEY="$SSH_PRIV_KEY" -var ISO_CHECKSUM="md5:$ISO_CHECKSUM" -var INIT_SCRIPT="$INIT_SCRIPT" -var KUBERNETES_PASSWORD="$KUBERNETES_PASSWORD" template.json

@@ -146,7 +146,7 @@ pushd $CURDIR/../
 if [ -z $TARGET_IMAGE ]; then
     mkdir -p ${PWD}/images/
 
-    export TARGET_IMAGE=${PWD}/images/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+    export TARGET_IMAGE=${PWD}/images/focal-k8s-$KUBERNETES_VERSION-amd64.img
 fi
 
 # GRPC network endpoint
@@ -323,7 +323,7 @@ if [ "$CUSTOM_IMAGE" == "YES" ] && [ ! -f $TARGET_IMAGE ]; then
 EOF
 		echo "Create multipass VM to create the custom image $TARGET_IMAGE"
 
-		multipass launch -n imagecreator -m 4096M -c 4 -d 20G --cloud-init=./config/imagecreator.yaml bionic
+		multipass launch -n imagecreator -m 4096M -c 4 -d 20G --cloud-init=./config/imagecreator.yaml focal
 
 		multipass_mount $PWD imagecreator:/masterkube
 
@@ -336,10 +336,10 @@ EOF
                 --password=$KUBERNETES_PASSWORD \
                 --cni-version=$CNI_VERSION \
                 --kubernetes-version=$KUBERNETES_VERSION \
-                --custom-image=/home/ubuntu/bionic-k8s-$KUBERNETES_VERSION-amd64.img
+                --custom-image=/home/ubuntu/focal-k8s-$KUBERNETES_VERSION-amd64.img
 
         multipass transfer \
-            imagecreator:/home/ubuntu/bionic-k8s-$KUBERNETES_VERSION-amd64.img \
+            imagecreator:/home/ubuntu/focal-k8s-$KUBERNETES_VERSION-amd64.img \
             $TARGET_IMAGE
 
 		multipass delete imagecreator -p
@@ -391,7 +391,7 @@ else
     }
 EOF
 
-	LAUNCH_IMAGE_URL="bionic"
+	LAUNCH_IMAGE_URL="focal"
 fi
 
 multipass launch -n masterkube -m 4096M -c 2 -d 10G --cloud-init=./config/cloud-init-masterkube.yaml $LAUNCH_IMAGE_URL
@@ -496,7 +496,7 @@ else
         "maxNode": $MAXNODES,
         "nodePrice": 0.0,
         "podPrice": 0.0,
-        "image": "bionic",
+        "image": "focal",
         "vm-provision": true,
         "kubeconfig": "$KUBECONFIG",
         "optionals": {
