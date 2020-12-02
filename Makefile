@@ -1,15 +1,18 @@
-all: build
+ALL_ARCH = amd64 arm64
+all: $(addprefix build-arch-,$(ALL_ARCH))
+
 VERSION_MAJOR ?= 1
 VERSION_MINOR ?= 19
 VERSION_BUILD ?= 4
 DEB_VERSION ?= $(VERSION_MAJOR).$(VERSION_MINOR)-$(VERSION_BUILD)
 TAG?=v$(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_BUILD)
 FLAGS=
-ENVVAR=
+LDFLAGS?=-s
+ENVVAR=CGO_ENABLED=0 GO111MODULE=off
 GOOS?=linux
-GOARCH?=amd64
+GOARCH?=$(shell go env GOARCH)
 REGISTRY?=fred78290
-BASEIMAGE?=k8s.gcr.io/debian-base-amd64:0.4.0
+BASEIMAGE?=gcr.io/distroless/static:latest
 BUILD_DATE?=`date +%Y-%m-%dT%H:%M:%SZ`
 VERSION_LDFLAGS=-X main.phVersion=$(TAGS)
 
@@ -28,21 +31,28 @@ deps:
 #	wget "https://raw.githubusercontent.com/Fred78290/autoscaler/master/cluster-autoscaler/cloudprovider/grpc/grpc.proto" -O grpc/grpc.proto
 #	protoc -I . -I vendor grpc/grpc.proto --go_out=plugins=grpc:.
 
-build:
-	$(ENVVAR) GOOS=$(GOOS) GOARCH=$(GOARCH) go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/multipass-autoscaler-$(GOOS)-$(GOARCH) ${TAGS_FLAG}
+build: build-arch-$(GOARCH)
 
-build-binary: clean deps
-	$(ENVVAR) make -e BUILD_DATE=${BUILD_DATE} -e REGISTRY=${REGISTRY} -e TAG=${TAG} -e GOOS=linux -e GOARCH=amd64 build
-	$(ENVVAR) make -e BUILD_DATE=${BUILD_DATE} -e REGISTRY=${REGISTRY} -e TAG=${TAG} -e GOOS=darwin -e GOARCH=amd64 build
+build-arch-%: clean-arch-% deps
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE) $(LDFLAGS)" -a -o out/multipass-autoscaler-$* ${TAGS_FLAG}
+
+build-binary: deps build-binary-arch-$(GOARCH)
+
+build-binary-arch-%: clean-arch-%
+	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/multipass-autoscaler-$* ${TAGS_FLAG}
 
 test-unit: clean deps
 	./scripts/run-tests.sh'
 
-dev-release: build-binary execute-release
+dev-release: dev-release-arch-$(GOARCH)
+
+dev-release-arch-%s: build-binary-arch-%s execute-release-arch-%s
 	@echo "Release ${TAG}${FOR_PROVIDER} completed"
 
-clean:
-#	sudo rm -rf out
+clean: clean-arch-$(GOARCH)
+
+clean-arch-%:
+	rm -f cluster-autoscaler-$*
 
 format:
 	test -z "$$(find . -path ./vendor -prune -type f -o -name '*.go' -exec gofmt -s -d {} + | tee /dev/stderr)" || \
@@ -51,15 +61,18 @@ format:
 docker-builder:
 	docker build -t kubernetes-multipass-autoscaler-builder ./builder
 
-build-in-docker: docker-builder
-	docker run --rm -v `pwd`:/gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler/ kubernetes-multipass-autoscaler-builder:latest bash \
-		-c 'cd /gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler \
-		&& BUILD_TAGS=${BUILD_TAGS} make -e REGISTRY=${REGISTRY} -e TAG=${TAG} -e BUILD_DATE=`date +%Y-%m-%dT%H:%M:%SZ` build-binary'
+build-in-docker: build-in-docker-arch-$(GOARCH)
 
-release: build-in-docker execute-release
+build-in-docker-arch-%: clean-arch-%  docker-builder
+	docker run --rm -v `pwd`:/gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler/:Z kubernetes-multipass-autoscaler-builder:latest \
+		bash -c 'cd /gopath/src/github.com/Fred78290/kubernetes-multipass-autoscaler && BUILD_TAGS="${BUILD_TAGS}" make -e REGISTRY=${REGISTRY} -e TAG=${TAG} -e BUILD_DATE=`date +%Y-%m-%dT%H:%M:%SZ` build-binary-arch-$*'
+
+release: $(addprefix build-in-docker-arch-,$(ALL_ARCH)) execute-release
 	@echo "Full in-docker release ${TAG}${FOR_PROVIDER} completed"
 
-container: clean build-in-docker
+container: container-arch-$(GOARCH)
+
+container-arch-%: build-in-docker-arch-%
 	@echo "Created in-docker image ${TAG}${FOR_PROVIDER}"
 
 test-in-docker: clean docker-builder

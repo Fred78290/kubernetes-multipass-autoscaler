@@ -39,5 +39,5 @@ jobs:
           tags: true
           repo: Fred78290/kubernetes-multipass-autoscaler
         file:
-          - out/multipass-autoscaler-darwin-amd64
-          - out/multipass-autoscaler-linux-amd64
+          - out/multipass-autoscaler-amd64
+          - out/multipass-autoscaler-arm64
