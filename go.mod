@@ -1,6 +1,6 @@
 module github.com/Fred78290/kubernetes-multipass-autoscaler
 
-go 1.14
+go 1.15
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
