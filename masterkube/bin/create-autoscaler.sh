@@ -8,6 +8,7 @@ pushd $CURDIR/../
 MASTER_IP=$(cat ./cluster/manager-ip)
 TOKEN=$(cat ./cluster/token)
 CACERT=$(cat ./cluster/ca.cert)
+GOARCH=$(go env GOARCH)
 
 export K8NAMESPACE=kube-system
 export ETC_DIR=./config/deployment/autoscaler
@@ -24,7 +25,7 @@ EOF") | jq . > $ETC_DIR/$1.json
 kubectl apply -f $ETC_DIR/$1.json --kubeconfig=./cluster/config
 }
 
-nohup ../out/multipass-autoscaler-$GOOS-amd64 \
+nohup ../out/multipass-autoscaler-$GOARCH \
     --cache-dir=$PWD/config \
     --config=$PWD/config/kubernetes-multipass-autoscaler.json \
     --save=$PWD/config/autoscaler-state.json \
@@ -34,7 +35,7 @@ pid="$!"
 
 echo -n "$pid" > config/multipass-autoscaler.pid
 
-echo "multipass-autoscaler-$GOOS-amd64 running with PID:$pid"
+echo "multipass-autoscaler-$GOARCH running with PID:$pid"
 
 deploy service-account
 deploy cluster-role
