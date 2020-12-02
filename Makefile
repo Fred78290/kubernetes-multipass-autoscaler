@@ -38,7 +38,7 @@ build-arch-%: clean-arch-% deps
 
 build-binary: deps build-binary-arch-$(GOARCH)
 
-build-binary-arch-%: clean-arch-%
+build-binary-arch-%: clean-arch-% deps
 	$(ENVVAR) GOOS=$(GOOS) GOARCH=$* go build -ldflags="-X main.phVersion=$(TAG) -X main.phBuildDate=$(BUILD_DATE)" -a -o out/multipass-autoscaler-$* ${TAGS_FLAG}
 
 test-unit: clean deps
