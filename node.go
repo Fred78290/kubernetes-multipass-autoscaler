@@ -158,10 +158,11 @@ func shell(args ...string) error {
 	return nil
 }
 
-func (vm *MultipassNode) prepareKubelet() error {
+func (vm *MultipassNode) prepareKubelet(extras *nodeCreationExtra) error {
 	var out string
 	var err error
-	var fName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.NodeName)
+	var srcName = fmt.Sprintf("%s/set-kubelet-default-%s.sh", extras.cacheDir, vm.NodeName)
+	var dstName = fmt.Sprintf("/tmp/set-kubelet-default-%s.sh", vm.NodeName)
 
 	kubeletDefault := []string{
 		"#!/bin/bash",
@@ -170,17 +171,17 @@ func (vm *MultipassNode) prepareKubelet() error {
 		"systemctl restart kubelet",
 	}
 
-	if err = ioutil.WriteFile(fName, []byte(strings.Join(kubeletDefault, "\n")), 0755); err != nil {
+	if err = ioutil.WriteFile(srcName, []byte(strings.Join(kubeletDefault, "\n")), 0755); err != nil {
 		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
 	}
 
-	defer os.Remove(fName)
+	defer os.Remove(srcName)
 
-	if out, err = pipe(multipassCommandLine, copyFileArgument, fName, vm.NodeName+":"+fName); err != nil {
+	if out, err = pipe(multipassCommandLine, copyFileArgument, srcName, vm.NodeName+":"+dstName); err != nil {
 		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
 	}
 
-	if out, err = pipe(multipassCommandLine, execArgument, vm.NodeName, dashDashArgument, sudoArgument, "bash", fName); err != nil {
+	if out, err = pipe(multipassCommandLine, execArgument, vm.NodeName, dashDashArgument, sudoArgument, "bash", dstName); err != nil {
 		return fmt.Errorf(errKubeletNotConfigured, vm.NodeName, out, err)
 	}
 
@@ -321,8 +322,10 @@ func (vm *MultipassNode) writeCloudFile(extras *nodeCreationExtra) (*os.File, er
 	var b []byte
 
 	if extras.cloudInit != nil && len(extras.cloudInit) > 0 {
-		fName := fmt.Sprintf("%s/cloud-init-%s.yaml", os.TempDir(), vm.NodeName)
+		fName := fmt.Sprintf("%s/cloud-init-%s.yaml", extras.cacheDir, vm.NodeName)
 		cloudInitFile, err = os.Create(fName)
+
+		glog.Infof("Create cloud file: %s", fName)
 
 		if err == nil {
 			if b, err = yaml.Marshal(extras.cloudInit); err == nil {
@@ -401,7 +404,7 @@ func (vm *MultipassNode) launchVM(extras *nodeCreationExtra) error {
 				} else if status == MultipassNodeStateRunning {
 					// If the VM is running call kubeadm join
 					if extras.vmprovision {
-						if err = vm.prepareKubelet(); err == nil {
+						if err = vm.prepareKubelet(extras); err == nil {
 							if err = vm.kubeAdmJoin(extras); err == nil {
 								if err = vm.waitReady(extras.kubeConfig); err == nil {
 									err = vm.setNodeLabels(extras)

@@ -59,6 +59,7 @@ type nodeCreationExtra struct {
 	nodeLabels    map[string]string
 	systemLabels  map[string]string
 	vmprovision   bool
+	cacheDir      string
 }
 
 func (g *MultipassNodeGroup) cleanup(kubeconfig string) error {

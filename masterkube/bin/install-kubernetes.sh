@@ -1,6 +1,6 @@
 #!/bin/bash
 KUBERNETES_VERSION=$1
-CNI_VERSION="v0.8.5"
+CNI_VERSION="v0.8.6"
 
 curl -s https://get.docker.com | bash
 
@@ -18,7 +18,7 @@ interface "eth0" {
 EOF
 
 if [ "x$KUBERNETES_VERSION" == "x" ]; then
-	RELEASE="v1.18.2"
+	RELEASE="v1.18.12"
 else
 	RELEASE=$KUBERNETES_VERSION
 fi
