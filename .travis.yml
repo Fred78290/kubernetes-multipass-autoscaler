@@ -21,7 +21,7 @@ jobs:
       install: true
       script:
         - make -e REGISTRY=fred78290 -e TAG=dev container -e GOARCH=amd64
-        - make -e REGISTRY=fred78290 -e TAG=dev container -e GOARCH=amd64
+        - make -e REGISTRY=fred78290 -e TAG=dev container -e GOARCH=arm64
         - sonar-scanner
     - stage: test
       services: docker
