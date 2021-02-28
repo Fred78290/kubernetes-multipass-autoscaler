@@ -38,7 +38,7 @@ type nodeTest struct {
 }
 
 var testNode = []nodeTest{
-	nodeTest{
+	{
 		name:    "Test Node VM",
 		wantErr: false,
 		vm: vm{
@@ -51,6 +51,16 @@ var testNode = []nodeTest{
 			},
 		},
 	},
+}
+
+func userCacheDir() string {
+	cacheDir, err := os.UserCacheDir()
+
+	if err != nil {
+		return "/tmp"
+	}
+
+	return cacheDir
 }
 
 func newTestConfig() (*MultipassServerConfig, error) {
@@ -100,7 +110,7 @@ func Test_multipassNode_launchVM(t *testing.T) {
 					nodeLabels:    nodeLabels,
 					systemLabels:  make(map[string]string),
 					vmprovision:   config.VMProvision,
-					cacheDir:      os.UserCacheDir(),
+					cacheDir:      userCacheDir(),
 				}
 
 				if err := vm.launchVM(extras); (err != nil) != tt.wantErr {
@@ -209,7 +219,7 @@ func Test_multipassNodeGroup_addNode(t *testing.T) {
 			nodeLabels:    testNodeGroup.NodeLabels,
 			systemLabels:  testNodeGroup.SystemLabels,
 			vmprovision:   config.VMProvision,
-			cacheDir:      os.UserCacheDir(),
+			cacheDir:      userCacheDir(),
 		}
 
 		tests := []struct {
@@ -250,7 +260,7 @@ func Test_multipassNodeGroup_deleteNode(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -301,7 +311,7 @@ func Test_multipassNodeGroup_deleteNodeGroup(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,

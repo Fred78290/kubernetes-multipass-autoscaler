@@ -113,7 +113,7 @@ func TestMultipassServer_NodeGroups(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -177,7 +177,7 @@ func TestMultipassServer_NodeGroupForNode(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -624,7 +624,7 @@ func TestMultipassServer_DeleteNodes(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -682,7 +682,7 @@ func TestMultipassServer_DecreaseTargetSize(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -819,7 +819,7 @@ func TestMultipassServer_Nodes(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -990,7 +990,7 @@ func TestMultipassServer_Delete(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
@@ -1107,7 +1107,7 @@ func TestMultipassServer_Belongs(t *testing.T) {
 		MaxNodeSize:  5,
 		PendingNodes: make(map[string]*MultipassNode),
 		Nodes: map[string]*MultipassNode{
-			testNodeName: &MultipassNode{
+			testNodeName: {
 				NodeName:         testNodeName,
 				Memory:           4096,
 				CPU:              4,
